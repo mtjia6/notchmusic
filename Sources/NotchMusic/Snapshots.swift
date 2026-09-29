@@ -17,8 +17,12 @@ enum Snapshots {
                        SearchResult(id: "2", title: "Sprinter", artist: "Dave & Central Cee")]
         let catalog = ((try? await CatalogSearch.songs(matching: "dave")) ?? []).prefix(5)
 
-        for (name, mode) in [("1-collapsed", NotchMode.collapsed), ("2-peek", .peek),
-                             ("3-expanded", .expanded), ("4-search", .search)] {
+        let savedDark = UserDefaults.standard.bool(forKey: "darkPanel")
+        defer { UserDefaults.standard.set(savedDark, forKey: "darkPanel") }
+        for (name, mode, dark) in [("1-collapsed", NotchMode.collapsed, false), ("2-peek", .peek, false),
+                                   ("3-expanded", .expanded, false), ("4-search", .search, false),
+                                   ("5-expanded-dark", .expanded, true)] {
+            UserDefaults.standard.set(dark, forKey: "darkPanel")
             music.debugSetState(track: track, artwork: cover, playing: true, position: 71,
                                 library: library, catalog: Array(catalog))
             let vm = NotchViewModel(notchSize: notch)
