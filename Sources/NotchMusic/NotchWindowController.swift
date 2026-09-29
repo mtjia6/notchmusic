@@ -160,17 +160,13 @@ final class NotchWindowController {
         }) { monitors.append(m) }
         if let m = NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown], handler: { [weak self] _ in
             // A click anywhere outside our panel dismisses it, except the
-            // prompter: you click into Zoom etc. while reading.
+            // script view: you click into Zoom etc. while reading.
             Task { @MainActor in
                 guard let self, self.vm.mode != .prompter else { return }
                 self.setMode(.collapsed)
             }
         }) { monitors.append(m) }
-        if let m = NSEvent.addLocalMonitorForEvents(matching: .scrollWheel, handler: { [weak self] e in
-            guard let self, self.vm.mode == .prompter else { return e }
-            self.prompter.nudge(-e.scrollingDeltaY * (e.hasPreciseScrollingDeltas ? 1 : 8))
-            return nil
-        }) { monitors.append(m) }
+
     }
 
     private func mouseMoved() {
@@ -240,9 +236,6 @@ final class NotchWindowController {
         }
         if mode != .search {
             music.clearSearch()
-        }
-        if mode != .prompter {
-            prompter.stop()
         }
         // Keep the script out of screen shares and recordings while prompting.
         panel.sharingType = (mode == .prompter || mode == .prompterEdit) ? .none : .readOnly

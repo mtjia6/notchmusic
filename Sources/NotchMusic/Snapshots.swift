@@ -13,7 +13,12 @@ enum Snapshots {
                           album: "Body & Soul", duration: 176)
         let notch = CGSize(width: 185, height: 32)
         let prompter = PrompterModel()
-        prompter.script = "Hey everyone, thanks for joining. Today I want to walk you through what we built this week, why it matters, and what comes next.\n\nFirst, the notch player."
+        prompter.scripts = [
+            Script(title: "Intro", body: "Hey everyone, thanks for joining. Today I want to walk you through what we built this week, why it matters, and what comes next.\n\nFirst, the notch player."),
+            Script(title: "Demo", body: "Open the notch."),
+            Script(title: "", body: "Closing thoughts and Q&A"),
+        ]
+        prompter.selectedID = prompter.scripts[0].id
 
         let library = [SearchResult(id: "1", title: "Raindance", artist: "Dave & Tems"),
                        SearchResult(id: "2", title: "Sprinter", artist: "Dave & Central Cee")]

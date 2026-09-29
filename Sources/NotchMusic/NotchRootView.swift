@@ -25,7 +25,7 @@ struct NotchRootView: View {
 
         ZStack(alignment: .top) {
             // Glow first, so it sits behind the body and only spills outside it.
-            // No glow while prompting: nothing should pull the eye from the text.
+            // No glow while the script is up: nothing should pull the eye from it.
             NotchGlow(shape: shape, accent: albumGlow ? music.accent : nil, isPlaying: music.isPlaying,
                       hasTrack: hasTrack && !prompting, intensity: 1)
 
@@ -75,10 +75,8 @@ struct NotchRootView: View {
                         .frame(size: vm.bodySize(for: .prompterEdit, hasTrack: hasTrack))
                         .transition(.opacity.animation(Motion.exit))
                 case .prompter:
-                    PrompterView(model: prompter, notchHeight: vm.notchSize.height) {
-                        prompter.stop()
-                        setMode(.prompterEdit)
-                    }
+                    PrompterView(model: prompter, notchHeight: vm.notchSize.height,
+                                 edit: { setMode(.prompterEdit) }, close: { setMode(.collapsed) })
                     .frame(size: vm.bodySize(for: .prompter, hasTrack: hasTrack))
                     .transition(.opacity.animation(Motion.exit))
                 }
@@ -537,7 +535,7 @@ private struct AppMenu: View {
     let openPrompter: () -> Void
 
     var body: some View {
-        Button("Teleprompter…", action: openPrompter)
+        Button("Script…", action: openPrompter)
         Divider()
         Toggle("Dark Panel", isOn: $darkPanel)
         Toggle("Glow in Album Color", isOn: $albumGlow)

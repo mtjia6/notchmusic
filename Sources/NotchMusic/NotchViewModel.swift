@@ -40,7 +40,7 @@ final class NotchViewModel: ObservableObject {
         case .search, .prompterEdit:
             return CGSize(width: max(notchSize.width + 300, 500), height: notchSize.height + 320)
         case .prompter:
-            return CGSize(width: max(notchSize.width + 300, 480), height: notchSize.height + 150)
+            return CGSize(width: max(notchSize.width + 300, 500), height: notchSize.height + 240)
         }
     }
 
