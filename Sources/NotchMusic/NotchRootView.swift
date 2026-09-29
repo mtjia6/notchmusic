@@ -11,7 +11,6 @@ struct NotchRootView: View {
     /// in the panel are the same element, so it travels between the two.
     @Namespace private var ns
     @AppStorage("darkPanel") private var darkPanel = false
-    @AppStorage("albumGlow") private var albumGlow = false
 
     var body: some View {
         let hasTrack = music.track != nil
@@ -24,11 +23,6 @@ struct NotchRootView: View {
         let palette = glass ? Palette.glass : Palette.dark(accent: music.accent)
 
         ZStack(alignment: .top) {
-            // Glow first, so it sits behind the body and only spills outside it.
-            // No glow while the script is up: nothing should pull the eye from it.
-            NotchGlow(shape: shape, accent: albumGlow ? music.accent : nil, isPlaying: music.isPlaying,
-                      hasTrack: hasTrack && !prompting, intensity: 1)
-
             // Body: black always underneath; the light surface fades in over it
             // as the notch opens, so the morph reads as "the notch blooms white".
             shape.fill(Color.black)
@@ -100,7 +94,7 @@ struct NotchRootView: View {
                 .allowsHitTesting(false)
         }
         .frame(width: size.width + 2 * flare, height: size.height)
-        .contextMenu { AppMenu(darkPanel: $darkPanel, albumGlow: $albumGlow) { setMode(.prompterEdit) } }
+        .contextMenu { AppMenu(darkPanel: $darkPanel) { setMode(.prompterEdit) } }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .animation(Motion.morph, value: hasTrack)
         .animation(Motion.morph, value: vm.mode)
@@ -531,14 +525,12 @@ private struct ResultRow: View {
 
 private struct AppMenu: View {
     @Binding var darkPanel: Bool
-    @Binding var albumGlow: Bool
     let openPrompter: () -> Void
 
     var body: some View {
         Button("Script…", action: openPrompter)
         Divider()
         Toggle("Dark Panel", isOn: $darkPanel)
-        Toggle("Glow in Album Color", isOn: $albumGlow)
         Button(SMAppService.mainApp.status == .enabled ? "✓ Launch at Login" : "Launch at Login") {
             let service = SMAppService.mainApp
             do {
