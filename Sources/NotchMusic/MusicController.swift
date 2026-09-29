@@ -23,7 +23,11 @@ struct SearchResult: Identifiable, Equatable {
 final class MusicController: ObservableObject {
     @Published private(set) var track: Track?
     @Published private(set) var isPlaying = false
-    @Published private(set) var artwork: NSImage?
+    @Published private(set) var artwork: NSImage? {
+        didSet { if artwork !== oldValue { makeAura(from: artwork) } }
+    }
+    /// Blurred, saturated version of the cover for the ambient glow.
+    @Published private(set) var aura: NSImage?
     @Published private(set) var accent: NSColor = .white
     @Published private(set) var searchResults: [SearchResult] = []
     @Published private(set) var catalogResults: [CatalogSong] = []
@@ -233,6 +237,29 @@ final class MusicController: ObservableObject {
         if artworkCache.count > 50 { artworkCache.removeAll() }
         artworkCache[key] = image
         return image
+    }
+
+    private func makeAura(from image: NSImage?) {
+        guard let image else { aura = nil; return }
+        Task {
+            let result = await Task.detached(priority: .utility) { ArtworkAura.make(from: image) }.value
+            guard self.artwork === image else { return }  // cover changed meanwhile
+            self.aura = result
+        }
+    }
+
+    /// Snapshot rendering only: puts the controller into a fixed state.
+    func debugSetState(track: Track?, artwork: NSImage?, playing: Bool, position: Double,
+                       library: [SearchResult] = [], catalog: [CatalogSong] = []) {
+        self.track = track
+        self.artwork = artwork
+        self.accent = artwork.map(ArtworkColor.accent(for:)) ?? .white
+        self.aura = artwork.flatMap(ArtworkAura.make(from:))
+        self.isPlaying = playing
+        self.positionAnchor = position
+        self.anchorDate = Date()
+        self.searchResults = library
+        self.catalogResults = catalog
     }
 
     // MARK: - Controls

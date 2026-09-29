@@ -2,7 +2,8 @@ import AppKit
 import SwiftUI
 
 enum NotchMode: Equatable {
-    case collapsed, expanded, search
+    /// `peek`: a brief, non-interactive widening that announces a new song.
+    case collapsed, peek, expanded, search
 }
 
 /// UI state only. Knows the hardware notch size and derives the shape's
@@ -30,6 +31,9 @@ final class NotchViewModel: ObservableObject {
             return hasTrack
                 ? CGSize(width: notchSize.width + 2 * (notchSize.height + 10), height: notchSize.height)
                 : notchSize
+        case .peek:
+            return CGSize(width: max(notchSize.width + 2 * (notchSize.height + 10) + 70, 330),
+                          height: notchSize.height + 42)
         case .expanded:
             return CGSize(width: max(notchSize.width + 260, 480), height: notchSize.height + 118)
         case .search:
@@ -38,7 +42,11 @@ final class NotchViewModel: ObservableObject {
     }
 
     var bottomRadius: CGFloat {
-        mode == .collapsed ? 10 : 26
+        switch mode {
+        case .collapsed: 10
+        case .peek: 18
+        case .expanded, .search: 26
+        }
     }
 
     /// Largest the shape can get; the window is sized to fit this plus shadow room.

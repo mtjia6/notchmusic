@@ -11,6 +11,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 }
 
+if let i = CommandLine.arguments.firstIndex(of: "--snapshot"), i + 1 < CommandLine.arguments.count {
+    let dir = URL(fileURLWithPath: CommandLine.arguments[i + 1])
+    Task { @MainActor in
+        await Snapshots.render(to: dir)
+        exit(0)
+    }
+    RunLoop.main.run()
+}
+
 let app = NSApplication.shared
 let delegate = MainActor.assumeIsolated { AppDelegate() }
 app.delegate = delegate

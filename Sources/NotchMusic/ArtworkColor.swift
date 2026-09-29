@@ -1,4 +1,5 @@
 import AppKit
+import CoreImage
 
 /// Picks an accent color from album art that reads well on pure black.
 enum ArtworkColor {
@@ -41,5 +42,26 @@ enum ArtworkColor {
 
         if sat < 0.15 { return NSColor(white: 0.92, alpha: 1) } // greyscale art
         return NSColor(hue: hue, saturation: min(max(sat, 0.45), 0.8), brightness: 0.95, alpha: 1)
+    }
+}
+
+/// Pre-renders the ambient glow: the cover shrunk to a few pixels, blurred and
+/// saturated once, off the main thread. Displaying it scaled up is then just a
+/// bitmap stretch, so drifting it every frame costs nothing (a live SwiftUI
+/// blur on a large image would re-filter on every transform change).
+enum ArtworkAura {
+    private static let context = CIContext(options: [.useSoftwareRenderer: false])
+
+    static func make(from image: NSImage) -> NSImage? {
+        guard let cg = image.cgImage(forProposedRect: nil, context: nil, hints: nil) else { return nil }
+        let input = CIImage(cgImage: cg)
+        let scale = 48 / max(input.extent.width, input.extent.height)
+        let small = input.transformed(by: CGAffineTransform(scaleX: scale, y: scale))
+        let blurred = small.clampedToExtent()
+            .applyingFilter("CIGaussianBlur", parameters: [kCIInputRadiusKey: 5])
+            .applyingFilter("CIColorControls", parameters: [kCIInputSaturationKey: 1.5, kCIInputBrightnessKey: 0.02])
+            .cropped(to: small.extent)
+        guard let out = context.createCGImage(blurred, from: small.extent) else { return nil }
+        return NSImage(cgImage: out, size: NSSize(width: out.width, height: out.height))
     }
 }

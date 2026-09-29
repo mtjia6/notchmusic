@@ -19,6 +19,7 @@ final class NotchWindowController {
     private var monitors: [Any] = []
     private var cancellables = Set<AnyCancellable>()
     private var pendingModeChange: DispatchWorkItem?
+    private var peekEnd: DispatchWorkItem?
 
     /// Extra room around the largest shape for its drop shadow.
     private let shadowPad: CGFloat = 40
@@ -61,6 +62,18 @@ final class NotchWindowController {
         ) { [weak self] _ in
             Task { @MainActor in self?.screenChanged() }
         }
+
+        // Announce song changes with a peek. Keyed on title+artist, so the
+        // optimistic catalog track being replaced by Music's real one (same
+        // song, different ID) does not peek twice.
+        music.$track
+            .map { $0.map { SearchKey.make($0.title, $0.artist) } }
+            .removeDuplicates()
+            .sink { [weak self] key in
+                guard key != nil else { return }
+                DispatchQueue.main.async { self?.peek() }
+            }
+            .store(in: &cancellables)
 
         vm.$mode
             .removeDuplicates()
@@ -149,13 +162,14 @@ final class NotchWindowController {
         let p = NSEvent.mouseLocation
         // Generous margin while collapsed so the tiny notch is easy to hit;
         // a little slack while expanded so grazing the edge doesn't close it.
-        let inside = shapeRect(margin: vm.mode == .collapsed ? 6 : 12).contains(p)
+        let collapsedLike = vm.mode == .collapsed || vm.mode == .peek
+        let inside = shapeRect(margin: collapsedLike ? 6 : 12).contains(p)
         panel.ignoresMouseEvents = !inside
 
         switch (vm.mode, inside) {
-        case (.collapsed, true):
+        case (.collapsed, true), (.peek, true):
             schedule(.expanded, after: 0.06)
-        case (.collapsed, false):
+        case (.collapsed, false), (.peek, false):
             cancelPending()
         case (.expanded, false):
             schedule(.collapsed, after: 0.28)
@@ -181,13 +195,25 @@ final class NotchWindowController {
         pendingModeChange = nil
     }
 
+    private func peek() {
+        guard vm.mode == .collapsed else { return }
+        setMode(.peek)
+        peekEnd?.cancel()
+        let work = DispatchWorkItem { [weak self] in
+            guard let self, self.vm.mode == .peek else { return }
+            self.setMode(.collapsed)
+        }
+        peekEnd = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2.8, execute: work)
+    }
+
     func setMode(_ mode: NotchMode) {
         cancelPending()
         guard vm.mode != mode else { return }
-        if vm.mode == .collapsed {
+        if mode == .expanded && (vm.mode == .collapsed || vm.mode == .peek) {
             NSHapticFeedbackManager.defaultPerformer.perform(.alignment, performanceTime: .now)
         }
-        withAnimation(.spring(response: 0.38, dampingFraction: 0.82)) {
+        withAnimation(Motion.morph) {
             vm.mode = mode
         }
         if mode == .search {
@@ -195,7 +221,7 @@ final class NotchWindowController {
         } else {
             music.clearSearch()
         }
-        if mode == .collapsed {
+        if mode == .collapsed || mode == .peek {
             panel.ignoresMouseEvents = !shapeRect(margin: 6).contains(NSEvent.mouseLocation)
         }
     }
