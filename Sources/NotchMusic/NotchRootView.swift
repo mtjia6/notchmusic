@@ -18,8 +18,8 @@ struct NotchRootView: View {
         let flare = NotchViewModel.topFlare
         let shape = NotchShape(topRadius: flare, bottomRadius: vm.bottomRadius)
         let open = vm.mode == .expanded || vm.mode == .search
-        let light = open && !darkPanel
-        let palette = light ? Palette.light(accent: music.accent) : Palette.dark(accent: music.accent)
+        let glass = open && !darkPanel
+        let palette = glass ? Palette.glass : Palette.dark(accent: music.accent)
 
         ZStack(alignment: .top) {
             // Glow first, so it sits behind the body and only spills outside it.
@@ -30,16 +30,15 @@ struct NotchRootView: View {
             // as the notch opens, so the morph reads as "the notch blooms white".
             shape.fill(Color.black)
                 .shadow(color: .black.opacity(open ? 0.35 : vm.mode == .peek ? 0.3 : 0), radius: 22, y: 10)
-            shape.fill(Palette.light(accent: music.accent).surface)
-                .opacity(light ? 1 : 0)
+            GlassSurface(shape: shape, bottomRadius: vm.bottomRadius)
+                .opacity(glass ? 1 : 0)
 
             ZStack(alignment: .top) {
-                if open {
+                if open && !glass {
                     // Quieter behind the search list, where text needs the contrast.
                     AuraBackground(aura: music.aura, isPlaying: music.isPlaying,
                                    topClearance: vm.notchSize.height,
-                                   strength: light ? (vm.mode == .search ? 0.22 : 0.4)
-                                                   : (vm.mode == .search ? 0.28 : 0.55))
+                                   strength: vm.mode == .search ? 0.28 : 0.55)
                         .transition(.opacity.animation(.easeOut(duration: 0.4)))
                 }
 
@@ -70,7 +69,7 @@ struct NotchRootView: View {
                 UnevenRoundedRectangle(bottomLeadingRadius: 11, bottomTrailingRadius: 11, style: .continuous)
                     .fill(Color.black)
                     .frame(width: vm.notchSize.width + 8, height: vm.notchSize.height + 4)
-                    .opacity(light ? 1 : 0)
+                    .opacity(glass ? 1 : 0)
                     .allowsHitTesting(false)
             }
             .frame(width: size.width + 2 * flare, height: size.height, alignment: .top)
@@ -79,7 +78,7 @@ struct NotchRootView: View {
 
             // A hairline along the edge: the panel reads as a physical slab.
             shape
-                .stroke(light ? Color.black.opacity(0.08) : Color.white.opacity(open ? 0.1 : 0), lineWidth: 1)
+                .stroke(Color.white.opacity(glass ? 0.38 : open ? 0.1 : 0), lineWidth: 1)
                 .allowsHitTesting(false)
         }
         .frame(width: size.width + 2 * flare, height: size.height)
@@ -88,7 +87,7 @@ struct NotchRootView: View {
         .animation(Motion.morph, value: hasTrack)
         .animation(Motion.morph, value: vm.mode)
         .animation(.easeInOut(duration: 0.3), value: darkPanel)
-        .environment(\.colorScheme, light ? .light : .dark)
+        .environment(\.colorScheme, .dark)
     }
 }
 
@@ -176,8 +175,8 @@ private struct ExpandedContent: View {
         VStack(spacing: 0) {
             // Strip beside the camera housing: nothing may sit in the middle.
             HStack {
-                EqualizerBars(isPlaying: music.isPlaying, color: palette.accent, barWidth: 2.5, maxHeight: 11)
-                    .opacity(music.track == nil ? 0 : 1)
+                EqualizerBars(isPlaying: music.isPlaying, color: palette.ink, barWidth: 2.5, maxHeight: 11)
+                    .opacity(music.track == nil ? 0 : 0.9)
                 Spacer()
                 NotchButton(systemName: "magnifyingglass", size: 12, hit: 26) { setMode(.search) }
             }
@@ -186,78 +185,113 @@ private struct ExpandedContent: View {
             .entrance(3)
 
             if let track = music.track {
-                HStack(alignment: .top, spacing: 16) {
-                    Artwork3DView(image: music.artwork, size: 100, radius: 18, accent: palette.accent,
+                HStack(alignment: .center, spacing: 14) {
+                    Artwork3DView(image: music.artwork, size: 64, radius: 14, accent: .black,
                                   breathing: music.isLoading)
                         .matchedGeometryEffect(id: "cover", in: ns)
 
-                    VStack(alignment: .leading, spacing: 0) {
-                        VStack(alignment: .leading, spacing: 2) {
-                            MarqueeText(text: track.title, font: .system(size: 17, weight: .bold), color: palette.ink)
-                            Text(track.artist)
-                                .font(.system(size: 14, weight: .medium))
-                                .foregroundStyle(palette.inkSecondary)
-                                .lineLimit(1)
-                            if !track.album.isEmpty {
-                                Text(track.album)
-                                    .font(.system(size: 12))
-                                    .foregroundStyle(palette.inkTertiary)
-                                    .lineLimit(1)
-                            }
-                        }
-                        .id(track.id)
-                        .transition(.asymmetric(insertion: .opacity.combined(with: .offset(y: 6)),
-                                                removal: .opacity.combined(with: .offset(y: -6))))
-                        .entrance(0)
-
-                        Spacer(minLength: 0)
-
-                        HStack(spacing: 6) {
-                            NotchButton(systemName: "backward.fill", size: 16, hit: 34, nudge: -3) { music.previous() }
-                            NotchButton(systemName: music.isPlaying || music.isLoading ? "pause.fill" : "play.fill",
-                                        size: 18, hit: 40, filled: true) { music.playPause() }
-                                .opacity(music.isLoading ? 0.5 : 1)
-                                .disabled(music.isLoading)
-                            NotchButton(systemName: "forward.fill", size: 16, hit: 34, nudge: 3) { music.next() }
-                        }
-                        .offset(x: -6)
-                        .entrance(1)
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text(music.isLoading ? "Loading" : music.isPlaying ? "Now Playing" : "Paused")
+                            .font(.system(size: 11, weight: .medium))
+                            .foregroundStyle(palette.inkSecondary)
+                            .contentTransition(.opacity)
+                        MarqueeText(text: track.title, font: .system(size: 24, weight: .medium), color: palette.ink)
+                            .frame(height: 30)
+                        Text(track.artist)
+                            .font(.system(size: 12, weight: .medium))
+                            .foregroundStyle(palette.inkSecondary)
+                            .lineLimit(1)
                     }
-                    .frame(height: 100)
+                    .id(track.id)
+                    .transition(.asymmetric(insertion: .opacity.combined(with: .offset(y: 6)),
+                                            removal: .opacity.combined(with: .offset(y: -6))))
+                    .entrance(0)
+
+                    Spacer(minLength: 10)
+
+                    HStack(spacing: 10) {
+                        NotchButton(systemName: "backward.fill", size: 11, hit: 32, nudge: -2, style: .glass) {
+                            music.previous()
+                        }
+                        NotchButton(systemName: music.isPlaying || music.isLoading ? "pause.fill" : "play.fill",
+                                    size: 15, hit: 44, style: .solid) { music.playPause() }
+                            .opacity(music.isLoading ? 0.6 : 1)
+                            .disabled(music.isLoading)
+                        NotchButton(systemName: "forward.fill", size: 11, hit: 32, nudge: 2, style: .glass) {
+                            music.next()
+                        }
+                    }
+                    .entrance(1)
                 }
                 .animation(Motion.standard, value: track.id)
                 .animation(Motion.quick, value: music.isLoading)
-                .padding(.horizontal, 24)
-                .padding(.top, 6)
+                .animation(Motion.quick, value: music.isPlaying)
+                .padding(.horizontal, 22)
+                .padding(.top, 8)
 
-                ProgressBar(music: music, accent: palette.accent)
-                    .padding(.horizontal, 20)
-                    .padding(.top, 14)
+                // Inset glass tray holding the wave, like a recessed control strip.
+                WaveProgress(music: music)
+                    .padding(.horizontal, 14)
+                    .padding(.top, 10)
+                    .padding(.bottom, 8)
+                    .background(
+                        RoundedRectangle(cornerRadius: 16, style: .continuous)
+                            .fill(palette.ink.opacity(0.1))
+                            .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous)
+                                .strokeBorder(palette.ink.opacity(0.28), lineWidth: 0.75))
+                    )
+                    .padding(.horizontal, 16)
+                    .padding(.top, 12)
                     .entrance(2)
             } else {
-                HStack(spacing: 16) {
-                    Artwork3DView(image: nil, size: 100, radius: 18, accent: palette.inkTertiary)
-                    VStack(alignment: .leading, spacing: 4) {
+                HStack(spacing: 14) {
+                    Artwork3DView(image: nil, size: 64, radius: 14, accent: .black)
+                    VStack(alignment: .leading, spacing: 2) {
                         Text("Nothing playing")
-                            .font(.system(size: 17, weight: .bold))
+                            .font(.system(size: 22, weight: .medium))
                             .foregroundStyle(palette.ink)
                         Text("Search for a song or open Music")
-                            .font(.system(size: 13))
+                            .font(.system(size: 12, weight: .medium))
                             .foregroundStyle(palette.inkSecondary)
-                        Button("Open Music") {
-                            NSWorkspace.shared.open(URL(fileURLWithPath: "/System/Applications/Music.app"))
-                        }
-                        .buttonStyle(PillStyle())
-                        .padding(.top, 6)
                     }
                     .entrance(0)
                     Spacer()
+                    Button("Open Music") {
+                        NSWorkspace.shared.open(URL(fileURLWithPath: "/System/Applications/Music.app"))
+                    }
+                    .buttonStyle(PillStyle())
+                    .entrance(1)
                 }
-                .padding(.horizontal, 24)
-                .padding(.top, 6)
+                .padding(.horizontal, 22)
+                .padding(.top, 8)
             }
             Spacer(minLength: 0)
         }
+    }
+}
+
+/// Frosted glass body: real behind-window blur, a faint dark tint so white
+/// text holds up on bright wallpapers, and a light sheen from the top-left.
+/// Offscreen snapshots can't capture the blur, so they get a stand-in.
+private struct GlassSurface: View {
+    let shape: NotchShape
+    let bottomRadius: CGFloat
+    @Environment(\.isSnapshot) private var isSnapshot
+
+    var body: some View {
+        ZStack {
+            if isSnapshot {
+                shape.fill(LinearGradient(colors: [Color(red: 0.62, green: 0.68, blue: 0.76),
+                                                   Color(red: 0.55, green: 0.6, blue: 0.68)],
+                                          startPoint: .topLeading, endPoint: .bottomTrailing))
+            } else {
+                GlassBackground(bottomRadius: bottomRadius)
+            }
+            shape.fill(Color.black.opacity(0.12))
+            shape.fill(LinearGradient(colors: [.white.opacity(0.22), .white.opacity(0)],
+                                      startPoint: .topLeading, endPoint: .center))
+        }
+        .allowsHitTesting(false)
     }
 }
 

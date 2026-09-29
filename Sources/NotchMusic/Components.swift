@@ -274,21 +274,21 @@ struct EqualizerBars: View {
 /// Icon button: hover lifts a soft disc behind it, press squashes it, and
 /// directional buttons nudge the way they point (anticipation for "next").
 struct NotchButton: View {
+    enum Style { case plain, glass, solid }
+
     let systemName: String
     var size: CGFloat = 16
     var hit: CGFloat = 32
     var nudge: CGFloat = 0
+    var style: Style = .plain
     let action: () -> Void
 
-    var filled = false   // accent disc behind the glyph (the primary action)
     @State private var hovering = false
-    @State private var taps = 0
     @State private var nudged = false
     @Environment(\.palette) private var palette
 
     var body: some View {
         Button {
-            taps += 1
             if nudge != 0 {
                 withAnimation(.easeOut(duration: 0.09)) { nudged = true }
                 withAnimation(.spring(response: 0.3, dampingFraction: 0.6).delay(0.09)) { nudged = false }
@@ -297,20 +297,39 @@ struct NotchButton: View {
         } label: {
             Image(systemName: systemName)
                 .font(.system(size: size, weight: .semibold))
-                .foregroundStyle(filled ? palette.onAccent : palette.ink.opacity(hovering ? 1 : 0.82))
+                .foregroundStyle(glyphColor)
                 .contentTransition(.symbolEffect(.replace.downUp))
                 .offset(x: nudged ? nudge : 0)
                 .frame(width: hit, height: hit)
-                .background(
-                    Circle()
-                        .fill(filled ? palette.accent : palette.wash.opacity(hovering ? 1.6 : 0))
-                        .scaleEffect(filled ? (hovering ? 1.06 : 1) : (hovering ? 1 : 0.7))
-                        .shadow(color: filled ? palette.accent.opacity(0.35) : .clear, radius: 8, y: 3)
-                )
+                .background(disc)
                 .contentShape(Circle())
         }
         .buttonStyle(PressScaleStyle())
         .onHover { h in withAnimation(Motion.quick) { hovering = h } }
+    }
+
+    private var glyphColor: Color {
+        switch style {
+        case .solid: palette.onAccent
+        case .glass: palette.ink
+        case .plain: palette.ink.opacity(hovering ? 1 : 0.82)
+        }
+    }
+
+    @ViewBuilder private var disc: some View {
+        switch style {
+        case .plain:
+            Circle().fill(palette.wash.opacity(hovering ? 1.6 : 0)).scaleEffect(hovering ? 1 : 0.7)
+        case .glass:
+            Circle()
+                .fill(palette.ink.opacity(hovering ? 0.26 : 0.16))
+                .overlay(Circle().strokeBorder(palette.ink.opacity(0.3), lineWidth: 0.75))
+        case .solid:
+            Circle()
+                .fill(palette.accent)
+                .scaleEffect(hovering ? 1.05 : 1)
+                .shadow(color: .black.opacity(0.18), radius: 8, y: 3)
+        }
     }
 }
 
@@ -407,6 +426,156 @@ struct ProgressBar: View {
     }
 }
 
+// MARK: - Wave progress
+
+/// Progress as a wave: the played part is a bright line, the rest faint, with
+/// a glowing dot at the playhead. The wave ripples while playing (the music is
+/// moving) and relaxes toward a flatter line when paused. Drag to seek.
+struct WaveProgress: View {
+    @ObservedObject var music: MusicController
+
+    @State private var dragFraction: Double?
+    @State private var hovering = false
+    @State private var amplitude: CGFloat = 1
+    @Environment(\.palette) private var palette
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    var body: some View {
+        let duration = music.track?.duration ?? 0
+        TimelineView(.animation(minimumInterval: 1.0 / 30, paused: !music.isPlaying && dragFraction == nil)) { ctx in
+            let now = ctx.date
+            let current = dragFraction.map { $0 * duration } ?? music.position(at: now)
+            let fraction = duration > 0 ? min(max(current / duration, 0), 1) : 0
+            let phase = reduceMotion ? 0 : now.timeIntervalSinceReferenceDate * 2.2
+            VStack(spacing: 6) {
+                GeometryReader { geo in
+                    let w = geo.size.width, h = geo.size.height
+                    let played = w * fraction
+                    let wave = WaveShape(phase: phase, amplitude: amplitude * (hovering ? 1.25 : 1))
+                    ZStack(alignment: .leading) {
+                        wave.stroke(palette.ink.opacity(0.32), style: StrokeStyle(lineWidth: 1.6, lineCap: .round))
+                            .mask(Rectangle().padding(.leading, played))
+                        wave.stroke(palette.ink, style: StrokeStyle(lineWidth: 2, lineCap: .round))
+                            .mask(alignment: .leading) { Rectangle().frame(width: played) }
+                            .shadow(color: palette.ink.opacity(0.5), radius: 3)
+                            .shimmer(music.isLoading)
+                        Circle()
+                            .fill(palette.ink)
+                            .frame(width: hovering || dragFraction != nil ? 11 : 8)
+                            .shadow(color: palette.ink.opacity(0.9), radius: 5)
+                            .position(x: played, y: wave.y(at: played, width: w, height: h))
+                    }
+                    .contentShape(Rectangle())
+                    .gesture(
+                        DragGesture(minimumDistance: 0)
+                            .onChanged { v in dragFraction = min(max(v.location.x / w, 0), 1) }
+                            .onEnded { v in
+                                music.seek(to: min(max(v.location.x / w, 0), 1) * duration)
+                                dragFraction = nil
+                            }
+                    )
+                }
+                .frame(height: 22)
+                .onHover { h in withAnimation(Motion.quick) { hovering = h } }
+
+                HStack {
+                    Text(format(current))
+                    Spacer()
+                    Text("-" + format(max(0, duration - current)))
+                }
+                .font(.system(size: 10.5, weight: .medium).monospacedDigit())
+                .foregroundStyle(palette.inkSecondary)
+            }
+        }
+        .onAppear { amplitude = music.isPlaying ? 1 : 0.35 }
+        .onChange(of: music.isPlaying) { _, playing in
+            withAnimation(.easeInOut(duration: 0.6)) { amplitude = playing ? 1 : 0.35 }
+        }
+    }
+
+    private func format(_ s: Double) -> String {
+        guard s.isFinite else { return "0:00" }
+        let total = Int(s.rounded(.down))
+        return String(format: "%d:%02d", total / 60, total % 60)
+    }
+}
+
+/// Two summed sines under an envelope that tapers to zero at both ends, so the
+/// line starts and finishes flat instead of being cut off mid-swing.
+struct WaveShape: Shape {
+    var phase: Double
+    var amplitude: CGFloat
+
+    var animatableData: CGFloat {
+        get { amplitude }
+        set { amplitude = newValue }
+    }
+
+    func y(at x: CGFloat, width: CGFloat, height: CGFloat) -> CGFloat {
+        guard width > 0 else { return height / 2 }
+        let u = Double(x / width)
+        let envelope = sin(u * .pi)                           // 0 at the ends, 1 in the middle
+        let v = 0.65 * sin(u * 2 * .pi * 5.5 - phase) + 0.35 * sin(u * 2 * .pi * 9.2 - phase * 1.6 + 1.3)
+        return height / 2 + CGFloat(v * envelope) * (height / 2 - 2) * amplitude
+    }
+
+    func path(in rect: CGRect) -> Path {
+        var p = Path()
+        let step: CGFloat = 2
+        var x: CGFloat = 0
+        p.move(to: CGPoint(x: 0, y: y(at: 0, width: rect.width, height: rect.height)))
+        while x <= rect.width {
+            p.addLine(to: CGPoint(x: x, y: y(at: x, width: rect.width, height: rect.height)))
+            x += step
+        }
+        return p
+    }
+}
+
+// MARK: - Glass
+
+/// Real behind-window blur (the desktop shows through, frosted), masked to the
+/// notch silhouette. `maskImage` is the documented way to shape an
+/// NSVisualEffectView; it is regenerated on every layout so it follows the
+/// frame while the panel morphs.
+struct GlassBackground: NSViewRepresentable {
+    var bottomRadius: CGFloat
+
+    func makeNSView(context: Context) -> ShapedEffectView {
+        let v = ShapedEffectView()
+        v.material = .hudWindow
+        v.blendingMode = .behindWindow
+        v.state = .active
+        v.appearance = NSAppearance(named: .vibrantLight)
+        return v
+    }
+
+    func updateNSView(_ v: ShapedEffectView, context: Context) {
+        v.bottomRadius = bottomRadius
+    }
+
+    final class ShapedEffectView: NSVisualEffectView {
+        var bottomRadius: CGFloat = 26 { didSet { if bottomRadius != oldValue { updateMask() } } }
+
+        override func layout() {
+            super.layout()
+            updateMask()
+        }
+
+        private func updateMask() {
+            let size = bounds.size
+            guard size.width > 0, size.height > 0 else { return }
+            let radius = bottomRadius
+            maskImage = NSImage(size: size, flipped: true) { rect in
+                let path = NotchShape(topRadius: NotchViewModel.topFlare, bottomRadius: radius).path(in: rect)
+                NSColor.black.setFill()
+                NSBezierPath(cgPath: path.cgPath).fill()
+                return true
+            }
+        }
+    }
+}
+
 // MARK: - Skeleton
 
 /// Placeholder row shaped like a search result, shown while results load.
@@ -431,29 +600,40 @@ struct SkeletonRow: View {
 
 // MARK: - Glow
 
-/// Light around the notch in the cover's colors. A slowly turning angular
-/// gradient, drawn twice: a wide blurred halo and a thin crisp rim. It turns
-/// while playing (ambient life), holds dim when paused, and is absent when
-/// nothing is loaded.
+/// Siri-style light around the notch: the Apple Intelligence palette in two
+/// angular gradients turning in opposite directions, so the colors flow into
+/// each other instead of spinning as one rigid ring. Wide blurred halo plus a
+/// thin rim. Flows while playing, holds dim when paused, absent with nothing
+/// loaded. Optionally tinted from the cover instead.
 struct NotchGlow<S: Shape>: View {
     let shape: S
-    /// nil = white light; otherwise tinted by the cover color.
+    /// nil = rainbow; otherwise hues around the cover color.
     let accent: NSColor?
     let isPlaying: Bool
     let hasTrack: Bool
     var intensity: Double = 1
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
+    static var rainbow: [Color] { [
+        Color(red: 0.74, green: 0.51, blue: 0.95),   // lavender
+        Color(red: 0.96, green: 0.73, blue: 0.92),   // pink
+        Color(red: 0.55, green: 0.62, blue: 1.0),    // periwinkle
+        Color(red: 1.0, green: 0.40, blue: 0.47),    // coral
+        Color(red: 1.0, green: 0.73, blue: 0.44),    // peach
+        Color(red: 0.78, green: 0.53, blue: 1.0),    // violet
+        Color(red: 0.74, green: 0.51, blue: 0.95),   // back to lavender, seamless
+    ] }
+
     var body: some View {
-        // White: bright and dimmer bands, so the rotation reads as moving light.
-        let colors = accent.map(Self.spectrum(from:))
-            ?? [.white, .white.opacity(0.45), .white, .white.opacity(0.3), .white]
+        let colors = accent.map(Self.spectrum(from:)) ?? Self.rainbow
         TimelineView(.animation(minimumInterval: 1.0 / 30, paused: !isPlaying || reduceMotion)) { ctx in
-            let angle = Angle.degrees(ctx.date.timeIntervalSinceReferenceDate * 40)
-            let gradient = AngularGradient(colors: colors, center: .center, angle: angle)
+            let t = ctx.date.timeIntervalSinceReferenceDate
+            let a = AngularGradient(colors: colors, center: .center, angle: .degrees(t * 45))
+            let b = AngularGradient(colors: colors.reversed(), center: .center, angle: .degrees(-t * 28 + 90))
             ZStack {
-                shape.stroke(gradient, lineWidth: 10).blur(radius: 14).opacity(0.9)
-                shape.stroke(gradient, lineWidth: 3).blur(radius: 3)
+                shape.stroke(a, lineWidth: 12).blur(radius: 16)
+                shape.stroke(b, lineWidth: 8).blur(radius: 10).opacity(0.6)
+                shape.stroke(a, lineWidth: 2.5).blur(radius: 2)
             }
         }
         .opacity(hasTrack ? (isPlaying ? intensity : intensity * 0.35) : 0)

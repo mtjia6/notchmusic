@@ -35,7 +35,7 @@ final class NotchViewModel: ObservableObject {
             return CGSize(width: max(notchSize.width + 2 * (notchSize.height + 10) + 70, 330),
                           height: notchSize.height + 42)
         case .expanded:
-            return CGSize(width: max(notchSize.width + 300, 500), height: notchSize.height + 158)
+            return CGSize(width: max(notchSize.width + 300, 500), height: notchSize.height + 160)
         case .search:
             return CGSize(width: max(notchSize.width + 300, 500), height: notchSize.height + 320)
         }

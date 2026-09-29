@@ -27,6 +27,14 @@ struct Palette {
                        accent: Color(nsColor: deepened(accent)), onAccent: .white, isLight: true)
     }
 
+    /// Frosted glass: white ink over a blurred desktop, white as the accent
+    /// (solid white play button with a dark glyph), like the reference design.
+    static var glass: Palette {
+        Palette(surface: .clear, ink: .white, inkSecondary: .white.opacity(0.78),
+                inkTertiary: .white.opacity(0.6), wash: .white.opacity(0.14),
+                accent: .white, onAccent: Color(red: 0.16, green: 0.17, blue: 0.2), isLight: false)
+    }
+
     /// The cover accent is picked to glow on black; on off-white it needs to be
     /// darker to keep contrast (WCAG AA against the surface), same hue.
     private static func deepened(_ c: NSColor) -> NSColor {
