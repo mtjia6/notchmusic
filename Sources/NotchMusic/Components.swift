@@ -240,32 +240,143 @@ struct MarqueeText: View {
 // MARK: - Equalizer
 
 /// Four bars that dance while playing and settle into a low line when paused.
-struct EqualizerBars: View {
+///
+/// Performance: built on Core Animation, not a SwiftUI TimelineView. The
+/// animations are handed to the window server once and run there, so the app
+/// does no per-frame work (the TimelineView version cost ~8% CPU while playing,
+/// just to re-render SwiftUI 30 times a second).
+struct EqualizerBars: NSViewRepresentable {
     let isPlaying: Bool
     let color: Color
     var barWidth: CGFloat = 3
     var maxHeight: CGFloat = 14
 
+    func makeNSView(context: Context) -> EqualizerView { EqualizerView() }
+
+    func updateNSView(_ view: EqualizerView, context: Context) {
+        view.update(isPlaying: isPlaying, color: NSColor(color), barWidth: barWidth, maxHeight: maxHeight)
+    }
+
+    func sizeThatFits(_ proposal: ProposedViewSize, nsView: EqualizerView, context: Context) -> CGSize? {
+        CGSize(width: barWidth * 4 + barWidth * 0.8 * 3, height: maxHeight)
+    }
+}
+
+final class EqualizerView: NSView {
+    /// Each bar is a sum of two sines, which reads as more organic than one.
+    /// Each sine is its own looping additive animation, so the loop is seamless
+    /// even though the two periods don't line up.
     private let speeds: [Double] = [5.1, 7.3, 4.2, 6.4]
     private let phases: [Double] = [0, 1.7, 3.1, 0.9]
+    private var bars: [CAGradientLayer] = []
+    private var isPlaying: Bool?
+    private var barWidth: CGFloat = 3
+    private var maxHeight: CGFloat = 14
 
-    var body: some View {
-        TimelineView(.animation(minimumInterval: 1.0 / 30, paused: !isPlaying)) { ctx in
-            let t = ctx.date.timeIntervalSinceReferenceDate
-            HStack(alignment: .center, spacing: barWidth * 0.8) {
-                ForEach(0..<4, id: \.self) { i in
-                    // Sum of two sines reads as more organic than one.
-                    let v = isPlaying
-                        ? 0.5 + 0.3 * sin(t * speeds[i] + phases[i]) + 0.2 * sin(t * speeds[i] * 1.9 + phases[i] * 2)
-                        : 0.18
-                    Capsule()
-                        .fill(LinearGradient(colors: [color, color.opacity(0.65)], startPoint: .top, endPoint: .bottom))
-                        .frame(width: barWidth, height: max(barWidth, maxHeight * v))
-                }
-            }
-            .frame(height: maxHeight)
-            .animation(.easeOut(duration: 0.3), value: isPlaying)
+    override init(frame: NSRect) {
+        super.init(frame: frame)
+        wantsLayer = true
+        for _ in 0..<4 {
+            let bar = CAGradientLayer()
+            bar.masksToBounds = true
+            layer!.addSublayer(bar)
+            bars.append(bar)
         }
+    }
+
+    required init?(coder: NSCoder) { fatalError() }
+
+    /// Bar height for a level in 0...1, never shorter than it is wide.
+    private func height(_ level: Double) -> CGFloat {
+        barWidth + (maxHeight - barWidth) * level
+    }
+
+    func update(isPlaying: Bool, color: NSColor, barWidth: CGFloat, maxHeight: CGFloat) {
+        let resized = barWidth != self.barWidth || maxHeight != self.maxHeight
+        self.barWidth = barWidth
+        self.maxHeight = maxHeight
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        for bar in bars {
+            bar.colors = [color.cgColor, color.withAlphaComponent(0.65).cgColor]
+            bar.cornerRadius = barWidth / 2
+        }
+        CATransaction.commit()
+        if resized { needsLayout = true }
+        if isPlaying != self.isPlaying {
+            let first = self.isPlaying == nil
+            self.isPlaying = isPlaying
+            isPlaying ? play() : pause(animated: !first)
+        }
+    }
+
+    override func layout() {
+        super.layout()
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        let resting = height(isPlaying == true ? 0.5 : 0.18)
+        for (i, bar) in bars.enumerated() {
+            bar.bounds = CGRect(x: 0, y: 0, width: barWidth, height: resting)
+            bar.position = CGPoint(x: barWidth / 2 + CGFloat(i) * barWidth * 1.8, y: bounds.midY)
+        }
+        CATransaction.commit()
+        if isPlaying == true { play() }   // amplitudes depend on the size
+    }
+
+    private func play() {
+        let base = height(0.5), span = maxHeight - barWidth
+        for (i, bar) in bars.enumerated() {
+            let from = bar.presentation()?.bounds.height ?? bar.bounds.height
+            bar.removeAllAnimations()
+            CATransaction.begin()
+            CATransaction.setDisableActions(true)
+            bar.bounds.size.height = base
+            CATransaction.commit()
+            // Rise from the paused line; the sines are added on top.
+            let rise = CABasicAnimation(keyPath: "bounds.size.height")
+            rise.fromValue = from
+            rise.toValue = base
+            rise.duration = 0.3
+            rise.timingFunction = CAMediaTimingFunction(name: .easeOut)
+            bar.add(rise, forKey: "rise")
+            bar.add(sine(speed: speeds[i], phase: phases[i], amplitude: 0.3 * span), forKey: "sine1")
+            bar.add(sine(speed: speeds[i] * 1.9, phase: phases[i] * 2, amplitude: 0.2 * span), forKey: "sine2")
+        }
+    }
+
+    private func pause(animated: Bool) {
+        let target = height(0.18)
+        for bar in bars {
+            // Freeze where the bar is right now, then ease down from there.
+            let from = bar.presentation()?.bounds.height ?? bar.bounds.height
+            bar.removeAllAnimations()
+            CATransaction.begin()
+            CATransaction.setDisableActions(true)
+            bar.bounds.size.height = target
+            CATransaction.commit()
+            guard animated else { continue }
+            let settle = CABasicAnimation(keyPath: "bounds.size.height")
+            settle.fromValue = from
+            settle.toValue = target
+            settle.duration = 0.3
+            settle.timingFunction = CAMediaTimingFunction(name: .easeOut)
+            bar.add(settle, forKey: "settle")
+        }
+    }
+
+    /// amplitude * sin(speed * t + phase), sampled over one period and looped
+    /// forever, added on top of the bar's height.
+    private func sine(speed: Double, phase: Double, amplitude: CGFloat) -> CAKeyframeAnimation {
+        let steps = 24
+        let anim = CAKeyframeAnimation(keyPath: "bounds.size.height")
+        anim.values = (0...steps).map { k in
+            amplitude * CGFloat(sin(2 * .pi * Double(k) / Double(steps) + phase))
+        }
+        anim.calculationMode = .cubic
+        anim.duration = 2 * .pi / speed
+        anim.repeatCount = .infinity
+        anim.isAdditive = true
+        return anim
     }
 }
 
