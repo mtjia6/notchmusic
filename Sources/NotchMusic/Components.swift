@@ -612,6 +612,7 @@ struct NotchGlow<S: Shape>: View {
     let isPlaying: Bool
     let hasTrack: Bool
     var intensity: Double = 1
+    @State private var clock = RayClock()
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     static var rainbow: [Color] { [
@@ -626,8 +627,8 @@ struct NotchGlow<S: Shape>: View {
 
     var body: some View {
         let colors = accent.map(Self.spectrum(from:)) ?? Self.rainbow
-        TimelineView(.animation(minimumInterval: 1.0 / 30, paused: !isPlaying || reduceMotion)) { ctx in
-            let t = ctx.date.timeIntervalSinceReferenceDate
+        TimelineView(.animation(minimumInterval: 1.0 / 30, paused: reduceMotion)) { ctx in
+            let t = clock.advance(to: ctx.date, targetSpeed: isPlaying ? 1 : 0.3)
             let a = AngularGradient(colors: colors, center: .center, angle: .degrees(t * 45))
             let b = AngularGradient(colors: colors.reversed(), center: .center, angle: .degrees(-t * 28 + 90))
             ZStack {
@@ -636,7 +637,7 @@ struct NotchGlow<S: Shape>: View {
                 shape.stroke(a, lineWidth: 2.5).blur(radius: 2)
             }
         }
-        .opacity(hasTrack ? (isPlaying ? intensity : intensity * 0.35) : 0)
+        .opacity(hasTrack ? (isPlaying ? intensity : intensity * 0.6) : 0)
         .animation(.easeInOut(duration: 0.6), value: isPlaying)
         .animation(.easeInOut(duration: 0.6), value: hasTrack)
         .allowsHitTesting(false)

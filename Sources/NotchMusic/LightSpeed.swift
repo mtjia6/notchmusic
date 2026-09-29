@@ -1,15 +1,17 @@
 import SwiftUI
 
-/// "Light speed" background: thin streaks radiating from the camera notch,
-/// each drawn three times with a slight angular offset (blue, warm, white core)
-/// for a chromatic-aberration fringe, added onto the panel with plus-lighter
-/// blending. Streaks lengthen as they travel outward (perspective) and fade in
-/// near the origin and out at the edges. They stream while music plays and
-/// hold still when paused.
+/// "Light speed" background: thin streaks radiating from the camera notch.
+/// Each streak is a soft bloom, blue and warm fringes offset by a hair of
+/// angle (chromatic aberration), and a hot white core, all added onto the
+/// panel with plus-lighter blending so overlaps brighten like light does.
+/// Streaks lengthen as they travel outward (perspective), fade at both ends,
+/// and twinkle as they pass. Always moving: full speed while music plays,
+/// easing down to a slow drift when paused.
 struct LightSpeedField: View {
     let origin: UnitPoint
     let isPlaying: Bool
     var intensity: Double = 1
+    @State private var clock = RayClock()
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     private struct Ray {
@@ -19,6 +21,7 @@ struct LightSpeedField: View {
         let length: Double
         let width: CGFloat
         let brightness: Double
+        let twinkle: Double
     }
 
     /// Fixed seed: the pattern is the same every launch and never "jumps".
@@ -29,15 +32,24 @@ struct LightSpeedField: View {
                 speed: rng.next(in: 0.05..<0.14),
                 offset: rng.next(in: 0..<1),
                 length: rng.next(in: 0.12..<0.4),
-                width: CGFloat(rng.next(in: 0.5..<1.5)),
-                brightness: rng.next(in: 0.35..<1))
+                width: CGFloat(rng.next(in: 0.6..<1.6)),
+                brightness: rng.next(in: 0.45..<1),
+                twinkle: rng.next(in: 0..<(2 * .pi)))
         }
     }()
 
+    private static let fringes: [(dAngle: Double, color: Color, width: CGFloat, alpha: Double)] = [
+        (0, Color(red: 0.55, green: 0.75, blue: 1), 5, 0.18),           // bloom
+        (-0.007, Color(red: 0.25, green: 0.55, blue: 1), 1.8, 0.95),    // blue fringe
+        (0.007, Color(red: 1, green: 0.58, blue: 0.2), 1.8, 0.9),       // warm fringe
+        (0, .white, 0.8, 1),                                            // hot core
+    ]
+
     var body: some View {
-        TimelineView(.animation(minimumInterval: 1.0 / 30, paused: !isPlaying || reduceMotion)) { ctx in
-            let t = ctx.date.timeIntervalSinceReferenceDate
+        TimelineView(.animation(minimumInterval: 1.0 / 30, paused: reduceMotion)) { ctx in
             Canvas { gc, size in
+                let t = clock.advance(to: ctx.date, targetSpeed: isPlaying ? 1 : 0.3)
+                let now = ctx.date.timeIntervalSinceReferenceDate
                 let o = CGPoint(x: size.width * origin.x, y: size.height * origin.y)
                 // Far enough to reach the farthest corner.
                 let reach = hypot(max(o.x, size.width - o.x), max(o.y, size.height - o.y))
@@ -46,26 +58,44 @@ struct LightSpeedField: View {
                     let d = (t * ray.speed + ray.offset).truncatingRemainder(dividingBy: 1)
                     let r0 = reach * (0.06 + d * d * 1.05)           // accelerates outward
                     let r1 = r0 + reach * ray.length * (0.35 + d)     // lengthens with distance
-                    let alpha = sin(d * .pi) * ray.brightness * intensity
+                    let flare = 0.75 + 0.25 * sin(now * 3.1 + ray.twinkle)
+                    let alpha = sin(d * .pi) * ray.brightness * flare * intensity
                     guard alpha > 0.02 else { continue }
-                    for (dAngle, color, w) in [(-0.006, Color(red: 0.35, green: 0.6, blue: 1), 1.6),
-                                               (0.006, Color(red: 1, green: 0.62, blue: 0.3), 1.6),
-                                               (0.0, Color.white, 0.7)] {
-                        let a = ray.angle + dAngle
+                    for f in Self.fringes {
+                        let a = ray.angle + f.dAngle
                         let start = CGPoint(x: o.x + cos(a) * r0, y: o.y + sin(a) * r0)
                         let end = CGPoint(x: o.x + cos(a) * r1, y: o.y + sin(a) * r1)
                         var p = Path()
                         p.move(to: start)
                         p.addLine(to: end)
-                        // Fades in and out along its length, so each streak has soft ends.
-                        let grad = Gradient(colors: [color.opacity(0), color.opacity(alpha * 0.55), color.opacity(0)])
+                        // Brightest just past the middle, soft at both ends.
+                        let peak = f.color.opacity(min(1, alpha * f.alpha))
+                        let grad = Gradient(stops: [.init(color: f.color.opacity(0), location: 0),
+                                                    .init(color: peak, location: 0.6),
+                                                    .init(color: f.color.opacity(0), location: 1)])
                         gc.stroke(p, with: .linearGradient(grad, startPoint: start, endPoint: end),
-                                  lineWidth: ray.width * w)
+                                  style: StrokeStyle(lineWidth: ray.width * f.width, lineCap: .round))
                     }
                 }
             }
         }
         .allowsHitTesting(false)
+    }
+}
+
+/// Integrates time at a variable speed, so slowing down on pause eases the
+/// streaks instead of making them jump (t * speed would teleport them).
+final class RayClock {
+    private var last: Date?
+    private var phase: Double = 0
+    private var speed: Double = 1
+
+    func advance(to date: Date, targetSpeed: Double) -> Double {
+        let dt = last.map { min(date.timeIntervalSince($0), 0.1) } ?? 0
+        last = date
+        speed += (targetSpeed - speed) * min(1, dt * 2.5)   // ~0.4 s ease toward target
+        phase += dt * speed
+        return phase
     }
 }
 
