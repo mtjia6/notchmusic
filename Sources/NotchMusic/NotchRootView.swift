@@ -9,6 +9,7 @@ struct NotchRootView: View {
     /// Shared-element space: the small cover in the notch and the big cover
     /// in the panel are the same element, so it travels between the two.
     @Namespace private var ns
+    @AppStorage("darkPanel") private var darkPanel = false
 
     var body: some View {
         let hasTrack = music.track != nil
@@ -16,18 +17,28 @@ struct NotchRootView: View {
         let flare = NotchViewModel.topFlare
         let shape = NotchShape(topRadius: flare, bottomRadius: vm.bottomRadius)
         let open = vm.mode == .expanded || vm.mode == .search
+        let light = open && !darkPanel
+        let palette = light ? Palette.light(accent: music.accent) : Palette.dark(accent: music.accent)
 
         ZStack(alignment: .top) {
-            shape
-                .fill(Color.black)
-                .shadow(color: .black.opacity(open ? 0.55 : vm.mode == .peek ? 0.3 : 0), radius: 18, y: 8)
+            // Glow first, so it sits behind the body and only spills outside it.
+            NotchGlow(shape: shape, accent: music.accent, isPlaying: music.isPlaying,
+                      hasTrack: hasTrack, intensity: 1)
+
+            // Body: black always underneath; the light surface fades in over it
+            // as the notch opens, so the morph reads as "the notch blooms white".
+            shape.fill(Color.black)
+                .shadow(color: .black.opacity(open ? 0.35 : vm.mode == .peek ? 0.3 : 0), radius: 22, y: 10)
+            shape.fill(Palette.light(accent: music.accent).surface)
+                .opacity(light ? 1 : 0)
 
             ZStack(alignment: .top) {
                 if open {
                     // Quieter behind the search list, where text needs the contrast.
                     AuraBackground(aura: music.aura, isPlaying: music.isPlaying,
                                    topClearance: vm.notchSize.height,
-                                   strength: vm.mode == .search ? 0.28 : 0.55)
+                                   strength: light ? (vm.mode == .search ? 0.22 : 0.4)
+                                                   : (vm.mode == .search ? 0.28 : 0.55))
                         .transition(.opacity.animation(.easeOut(duration: 0.4)))
                 }
 
@@ -51,23 +62,32 @@ struct NotchRootView: View {
                         .frame(size: vm.bodySize(for: .search, hasTrack: hasTrack))
                         .transition(.opacity.animation(Motion.exit))
                 }
+
+                // On the light card the camera housing sits in a black cutout,
+                // slightly larger than the hardware notch so it reads as a
+                // deliberate frame instead of a mismatched edge.
+                UnevenRoundedRectangle(bottomLeadingRadius: 11, bottomTrailingRadius: 11, style: .continuous)
+                    .fill(Color.black)
+                    .frame(width: vm.notchSize.width + 8, height: vm.notchSize.height + 4)
+                    .opacity(light ? 1 : 0)
+                    .allowsHitTesting(false)
             }
             .frame(width: size.width + 2 * flare, height: size.height, alignment: .top)
             .clipShape(shape)
+            .environment(\.palette, palette)
 
-            // A hairline catching light along the lower edge: the panel reads as
-            // a physical slab rather than a flat cut-out.
+            // A hairline along the edge: the panel reads as a physical slab.
             shape
-                .stroke(LinearGradient(colors: [.clear, .white.opacity(open ? 0.1 : 0)],
-                                       startPoint: .top, endPoint: .bottom), lineWidth: 1)
+                .stroke(light ? Color.black.opacity(0.08) : Color.white.opacity(open ? 0.1 : 0), lineWidth: 1)
                 .allowsHitTesting(false)
         }
         .frame(width: size.width + 2 * flare, height: size.height)
-        .contextMenu { AppMenu() }
+        .contextMenu { AppMenu(darkPanel: $darkPanel) }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .animation(Motion.morph, value: hasTrack)
         .animation(Motion.morph, value: vm.mode)
-        .environment(\.colorScheme, .dark)
+        .animation(.easeInOut(duration: 0.3), value: darkPanel)
+        .environment(\.colorScheme, light ? .light : .dark)
     }
 }
 
@@ -149,78 +169,91 @@ private struct ExpandedContent: View {
     let notchHeight: CGFloat
     let ns: Namespace.ID
     let setMode: (NotchMode) -> Void
+    @Environment(\.palette) private var palette
 
     var body: some View {
-        let accent = Color(nsColor: music.accent)
         VStack(spacing: 0) {
             // Strip beside the camera housing: nothing may sit in the middle.
             HStack {
-                EqualizerBars(isPlaying: music.isPlaying, color: accent, barWidth: 2.5, maxHeight: 11)
+                EqualizerBars(isPlaying: music.isPlaying, color: palette.accent, barWidth: 2.5, maxHeight: 11)
                     .opacity(music.track == nil ? 0 : 1)
                 Spacer()
-                NotchButton(systemName: "magnifyingglass", size: 12, hit: 24) { setMode(.search) }
+                NotchButton(systemName: "magnifyingglass", size: 12, hit: 26) { setMode(.search) }
             }
             .frame(height: notchHeight)
-            .padding(.horizontal, 26)
+            .padding(.horizontal, 24)
             .entrance(3)
 
             if let track = music.track {
-                HStack(spacing: 14) {
-                    Artwork3DView(image: music.artwork, size: 64, radius: 13, accent: accent,
+                HStack(alignment: .top, spacing: 16) {
+                    Artwork3DView(image: music.artwork, size: 100, radius: 18, accent: palette.accent,
                                   breathing: music.isLoading)
                         .matchedGeometryEffect(id: "cover", in: ns)
-                    VStack(alignment: .leading, spacing: 2) {
-                        MarqueeText(text: track.title, font: .system(size: 15, weight: .semibold), color: .white)
-                        Text(track.artist)
-                            .font(.system(size: 13))
-                            .foregroundStyle(.white.opacity(0.6))
-                            .lineLimit(1)
+
+                    VStack(alignment: .leading, spacing: 0) {
+                        VStack(alignment: .leading, spacing: 2) {
+                            MarqueeText(text: track.title, font: .system(size: 17, weight: .bold), color: palette.ink)
+                            Text(track.artist)
+                                .font(.system(size: 14, weight: .medium))
+                                .foregroundStyle(palette.inkSecondary)
+                                .lineLimit(1)
+                            if !track.album.isEmpty {
+                                Text(track.album)
+                                    .font(.system(size: 12))
+                                    .foregroundStyle(palette.inkTertiary)
+                                    .lineLimit(1)
+                            }
+                        }
+                        .id(track.id)
+                        .transition(.asymmetric(insertion: .opacity.combined(with: .offset(y: 6)),
+                                                removal: .opacity.combined(with: .offset(y: -6))))
+                        .entrance(0)
+
+                        Spacer(minLength: 0)
+
+                        HStack(spacing: 6) {
+                            NotchButton(systemName: "backward.fill", size: 16, hit: 34, nudge: -3) { music.previous() }
+                            NotchButton(systemName: music.isPlaying || music.isLoading ? "pause.fill" : "play.fill",
+                                        size: 18, hit: 40, filled: true) { music.playPause() }
+                                .opacity(music.isLoading ? 0.5 : 1)
+                                .disabled(music.isLoading)
+                            NotchButton(systemName: "forward.fill", size: 16, hit: 34, nudge: 3) { music.next() }
+                        }
+                        .offset(x: -6)
+                        .entrance(1)
                     }
-                    .id(track.id)
-                    .transition(.asymmetric(insertion: .opacity.combined(with: .offset(y: 6)),
-                                            removal: .opacity.combined(with: .offset(y: -6))))
-                    .entrance(0)
-                    Spacer(minLength: 8)
-                    HStack(spacing: 2) {
-                        NotchButton(systemName: "backward.fill", size: 15, nudge: -3) { music.previous() }
-                        NotchButton(systemName: music.isPlaying || music.isLoading ? "pause.fill" : "play.fill",
-                                    size: 22, hit: 42) { music.playPause() }
-                            .opacity(music.isLoading ? 0.45 : 1)
-                            .disabled(music.isLoading)
-                        NotchButton(systemName: "forward.fill", size: 15, nudge: 3) { music.next() }
-                    }
-                    .entrance(1)
+                    .frame(height: 100)
                 }
                 .animation(Motion.standard, value: track.id)
                 .animation(Motion.quick, value: music.isLoading)
                 .padding(.horizontal, 24)
-                .padding(.top, 4)
+                .padding(.top, 6)
 
-                ProgressBar(music: music, accent: accent)
-                    .padding(.horizontal, 22)
-                    .padding(.top, 12)
+                ProgressBar(music: music, accent: palette.accent)
+                    .padding(.horizontal, 20)
+                    .padding(.top, 14)
                     .entrance(2)
             } else {
-                HStack(spacing: 14) {
-                    Artwork3DView(image: nil, size: 64, radius: 13, accent: .white)
-                    VStack(alignment: .leading, spacing: 3) {
+                HStack(spacing: 16) {
+                    Artwork3DView(image: nil, size: 100, radius: 18, accent: palette.inkTertiary)
+                    VStack(alignment: .leading, spacing: 4) {
                         Text("Nothing playing")
-                            .font(.system(size: 15, weight: .semibold))
-                            .foregroundStyle(.white)
+                            .font(.system(size: 17, weight: .bold))
+                            .foregroundStyle(palette.ink)
                         Text("Search for a song or open Music")
                             .font(.system(size: 13))
-                            .foregroundStyle(.white.opacity(0.6))
+                            .foregroundStyle(palette.inkSecondary)
+                        Button("Open Music") {
+                            NSWorkspace.shared.open(URL(fileURLWithPath: "/System/Applications/Music.app"))
+                        }
+                        .buttonStyle(PillStyle())
+                        .padding(.top, 6)
                     }
                     .entrance(0)
                     Spacer()
-                    Button("Open Music") {
-                        NSWorkspace.shared.open(URL(fileURLWithPath: "/System/Applications/Music.app"))
-                    }
-                    .buttonStyle(PillStyle())
-                    .entrance(1)
                 }
                 .padding(.horizontal, 24)
-                .padding(.top, 4)
+                .padding(.top, 6)
             }
             Spacer(minLength: 0)
         }
@@ -235,10 +268,11 @@ private struct SearchContent: View {
     let setMode: (NotchMode) -> Void
 
     @State private var query = ""
+    @Environment(\.palette) private var palette
     @FocusState private var focused: Bool
 
     var body: some View {
-        let accent = Color(nsColor: music.accent)
+        let accent = palette.accent
         VStack(spacing: 0) {
             HStack {
                 NotchButton(systemName: "chevron.left", size: 11, hit: 24, nudge: -2) { setMode(.expanded) }
@@ -250,11 +284,11 @@ private struct SearchContent: View {
             HStack(spacing: 8) {
                 Image(systemName: "magnifyingglass")
                     .font(.system(size: 12, weight: .medium))
-                    .foregroundStyle(.white.opacity(0.5))
+                    .foregroundStyle(palette.ink.opacity(0.5))
                 TextField("Songs, artists, albums", text: $query)
                     .textFieldStyle(.plain)
                     .font(.system(size: 14))
-                    .foregroundStyle(.white)
+                    .foregroundStyle(palette.ink)
                     .tint(accent)
                     .focused($focused)
                     .onSubmit {
@@ -264,7 +298,7 @@ private struct SearchContent: View {
                 if !query.isEmpty {
                     Button { query = "" } label: {
                         Image(systemName: "xmark.circle.fill")
-                            .foregroundStyle(.white.opacity(0.35))
+                            .foregroundStyle(palette.ink.opacity(0.35))
                     }
                     .buttonStyle(.plain)
                     .transition(.opacity.combined(with: .scale(scale: 0.6)))
@@ -274,13 +308,14 @@ private struct SearchContent: View {
             .frame(height: 34)
             .background(
                 RoundedRectangle(cornerRadius: 10, style: .continuous)
-                    .fill(.white.opacity(0.08))
+                    .fill(palette.ink.opacity(0.08))
                     .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous)
-                        .strokeBorder(focused ? accent.opacity(0.55) : .white.opacity(0.06), lineWidth: 1))
+                        .strokeBorder(focused ? accent.opacity(0.55) : palette.ink.opacity(0.06), lineWidth: 1))
             )
             .animation(Motion.quick, value: focused)
             .animation(Motion.quick, value: query.isEmpty)
             .padding(.horizontal, 20)
+            .padding(.top, 10)   // clear the camera cutout
             .entrance(0)
 
             ScrollView {
@@ -332,12 +367,12 @@ private struct SearchContent: View {
                     && !music.isSearching && !query.isEmpty {
                     Text("No matches for \u{201C}\(query)\u{201D}")
                         .font(.system(size: 13))
-                        .foregroundStyle(.white.opacity(0.4))
+                        .foregroundStyle(palette.ink.opacity(0.4))
                         .transition(.opacity)
                 } else if query.isEmpty {
                     Text("Your library and Apple Music")
                         .font(.system(size: 13))
-                        .foregroundStyle(.white.opacity(0.3))
+                        .foregroundStyle(palette.ink.opacity(0.3))
                         .transition(.opacity)
                 }
             }
@@ -365,10 +400,11 @@ private struct SearchContent: View {
 
 private struct SectionHeader: View {
     let title: String
+    @Environment(\.palette) private var palette
     var body: some View {
         Text(title)
             .font(.system(size: 11, weight: .semibold))
-            .foregroundStyle(.white.opacity(0.4))
+            .foregroundStyle(palette.ink.opacity(0.4))
             .padding(.horizontal, 10)
             .padding(.top, 12)
             .padding(.bottom, 3)
@@ -383,6 +419,7 @@ private struct ResultRow: View {
     let index: Int
     let action: () -> Void
     @State private var hovering = false
+    @Environment(\.palette) private var palette
 
     var body: some View {
         Button(action: action) {
@@ -391,21 +428,21 @@ private struct ResultRow: View {
                 VStack(alignment: .leading, spacing: 1) {
                     Text(title)
                         .font(.system(size: 13, weight: .medium))
-                        .foregroundStyle(.white)
+                        .foregroundStyle(palette.ink)
                     Text(artist)
                         .font(.system(size: 11))
-                        .foregroundStyle(.white.opacity(0.5))
+                        .foregroundStyle(palette.ink.opacity(0.5))
                 }
                 .lineLimit(1)
                 Spacer()
                 Image(systemName: trailing)
                     .font(.system(size: 10, weight: .semibold))
-                    .foregroundStyle(.white.opacity(hovering ? 0.85 : 0))
+                    .foregroundStyle(palette.ink.opacity(hovering ? 0.85 : 0))
                     .offset(x: hovering ? 0 : -4)
             }
             .padding(.horizontal, 10)
             .padding(.vertical, 5)
-            .background(RoundedRectangle(cornerRadius: 9, style: .continuous).fill(.white.opacity(hovering ? 0.09 : 0)))
+            .background(RoundedRectangle(cornerRadius: 9, style: .continuous).fill(palette.ink.opacity(hovering ? 0.09 : 0)))
             .contentShape(Rectangle())
         }
         .buttonStyle(PressScaleStyle())
@@ -421,7 +458,7 @@ private struct ResultRow: View {
                 if let image = phase.image {
                     image.resizable().aspectRatio(contentMode: .fill)
                 } else {
-                    Color.white.opacity(0.08)
+                    palette.ink.opacity(0.08)
                 }
             }
             .frame(width: 30, height: 30)
@@ -429,9 +466,9 @@ private struct ResultRow: View {
         } else {
             Image(systemName: "music.note")
                 .font(.system(size: 12))
-                .foregroundStyle(.white.opacity(0.45))
+                .foregroundStyle(palette.ink.opacity(0.45))
                 .frame(width: 30, height: 30)
-                .background(shape.fill(.white.opacity(0.08)))
+                .background(shape.fill(palette.ink.opacity(0.08)))
         }
     }
 }
@@ -439,7 +476,10 @@ private struct ResultRow: View {
 // MARK: - Context menu
 
 private struct AppMenu: View {
+    @Binding var darkPanel: Bool
+
     var body: some View {
+        Toggle("Dark Panel", isOn: $darkPanel)
         Button(SMAppService.mainApp.status == .enabled ? "✓ Launch at Login" : "Launch at Login") {
             let service = SMAppService.mainApp
             do {

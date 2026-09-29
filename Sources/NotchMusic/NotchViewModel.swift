@@ -35,9 +35,9 @@ final class NotchViewModel: ObservableObject {
             return CGSize(width: max(notchSize.width + 2 * (notchSize.height + 10) + 70, 330),
                           height: notchSize.height + 42)
         case .expanded:
-            return CGSize(width: max(notchSize.width + 260, 480), height: notchSize.height + 118)
+            return CGSize(width: max(notchSize.width + 300, 500), height: notchSize.height + 158)
         case .search:
-            return CGSize(width: max(notchSize.width + 260, 480), height: notchSize.height + 320)
+            return CGSize(width: max(notchSize.width + 300, 500), height: notchSize.height + 320)
         }
     }
 
@@ -51,6 +51,6 @@ final class NotchViewModel: ObservableObject {
 
     /// Largest the shape can get; the window is sized to fit this plus shadow room.
     var maxBodySize: CGSize {
-        CGSize(width: max(notchSize.width + 260, 480), height: notchSize.height + 320)
+        CGSize(width: max(notchSize.width + 300, 500), height: notchSize.height + 320)
     }
 }

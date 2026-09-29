@@ -7,10 +7,10 @@ import SwiftUI
 enum Snapshots {
     static func render(to dir: URL) async {
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        let cover = await firstCatalogCover("raindance dave tems")
+        let cover = await firstCatalogCover("duffel bag joeboy")
         let music = MusicController()
-        let track = Track(id: "demo", title: "Raindance (feat. Tems) - Extended Version", artist: "Dave & Tems",
-                          album: "The Boy Who Played the Harp", duration: 214)
+        let track = Track(id: "demo", title: "Duffel Bag", artist: "Joeboy",
+                          album: "Body & Soul", duration: 176)
         let notch = CGSize(width: 185, height: 32)
 
         let library = [SearchResult(id: "1", title: "Raindance", artist: "Dave & Tems"),

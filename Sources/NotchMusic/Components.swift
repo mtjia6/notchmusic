@@ -29,13 +29,15 @@ struct ArtworkView: View {
 
 private struct ArtworkPlaceholder: View {
     let size: CGFloat
+    @Environment(\.palette) private var palette
     var body: some View {
         ZStack {
-            LinearGradient(colors: [Color(white: 0.2), Color(white: 0.11)],
+            LinearGradient(colors: palette.isLight ? [Color(white: 0.88), Color(white: 0.8)]
+                                                   : [Color(white: 0.2), Color(white: 0.11)],
                            startPoint: .topLeading, endPoint: .bottomTrailing)
             Image(systemName: "music.note")
                 .font(.system(size: size * 0.38, weight: .medium))
-                .foregroundStyle(.white.opacity(0.3))
+                .foregroundStyle(palette.inkTertiary)
         }
     }
 }
@@ -51,6 +53,7 @@ struct Artwork3DView: View {
     var breathing = false
 
     @State private var tilt: CGPoint = .zero          // -1...1 on each axis
+    @Environment(\.palette) private var palette
     @State private var hovering = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
@@ -82,7 +85,7 @@ struct Artwork3DView: View {
                 .blendMode(.plusLighter)
                 .allowsHitTesting(false)
         }
-        .overlay(shape.strokeBorder(.white.opacity(0.08), lineWidth: 0.5))
+        .overlay(shape.strokeBorder(palette.ink.opacity(0.08), lineWidth: 0.5))
         .opacity(breathing ? 0.72 : 1)
         .animation(breathing ? .easeInOut(duration: 0.9).repeatForever(autoreverses: true) : .easeOut(duration: 0.3),
                    value: breathing)
@@ -90,7 +93,8 @@ struct Artwork3DView: View {
         .rotation3DEffect(.degrees(Double(tilt.x) * 12), axis: (x: 0, y: 1, z: 0), perspective: 0.6)
         .scaleEffect(hovering ? 1.04 : 1)
         // Secondary motion: the shadow slides away from the light and grows as the card lifts.
-        .shadow(color: accent.opacity(hovering ? 0.5 : 0.32), radius: hovering ? 16 : 11,
+        .shadow(color: accent.opacity(palette.isLight ? (hovering ? 0.45 : 0.3) : (hovering ? 0.5 : 0.32)),
+                radius: hovering ? 18 : 12,
                 x: -tilt.x * 6, y: 3 + tilt.y * 6)
         .animation(.spring(response: 0.35, dampingFraction: 0.75), value: tilt)
         .animation(Motion.quick, value: hovering)
@@ -276,9 +280,11 @@ struct NotchButton: View {
     var nudge: CGFloat = 0
     let action: () -> Void
 
+    var filled = false   // accent disc behind the glyph (the primary action)
     @State private var hovering = false
     @State private var taps = 0
     @State private var nudged = false
+    @Environment(\.palette) private var palette
 
     var body: some View {
         Button {
@@ -291,11 +297,16 @@ struct NotchButton: View {
         } label: {
             Image(systemName: systemName)
                 .font(.system(size: size, weight: .semibold))
-                .foregroundStyle(.white.opacity(hovering ? 1 : 0.86))
+                .foregroundStyle(filled ? palette.onAccent : palette.ink.opacity(hovering ? 1 : 0.82))
                 .contentTransition(.symbolEffect(.replace.downUp))
                 .offset(x: nudged ? nudge : 0)
                 .frame(width: hit, height: hit)
-                .background(Circle().fill(.white.opacity(hovering ? 0.12 : 0)).scaleEffect(hovering ? 1 : 0.7))
+                .background(
+                    Circle()
+                        .fill(filled ? palette.accent : palette.wash.opacity(hovering ? 1.6 : 0))
+                        .scaleEffect(filled ? (hovering ? 1.06 : 1) : (hovering ? 1 : 0.7))
+                        .shadow(color: filled ? palette.accent.opacity(0.35) : .clear, radius: 8, y: 3)
+                )
                 .contentShape(Circle())
         }
         .buttonStyle(PressScaleStyle())
@@ -312,13 +323,14 @@ struct PressScaleStyle: ButtonStyle {
 }
 
 struct PillStyle: ButtonStyle {
+    @Environment(\.palette) private var palette
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
             .font(.system(size: 12, weight: .semibold))
-            .foregroundStyle(.white)
+            .foregroundStyle(palette.ink)
             .padding(.horizontal, 12)
             .padding(.vertical, 6)
-            .background(Capsule().fill(.white.opacity(configuration.isPressed ? 0.25 : 0.14)))
+            .background(Capsule().fill(palette.wash.opacity(configuration.isPressed ? 2.4 : 1.6)))
             .scaleEffect(configuration.isPressed ? 0.96 : 1)
             .animation(Motion.quick, value: configuration.isPressed)
     }
@@ -335,6 +347,7 @@ struct ProgressBar: View {
 
     @State private var dragFraction: Double?
     @State private var hovering = false
+    @Environment(\.palette) private var palette
 
     var body: some View {
         let duration = music.track?.duration ?? 0
@@ -348,10 +361,10 @@ struct ProgressBar: View {
                 GeometryReader { geo in
                     let w = geo.size.width
                     ZStack(alignment: .leading) {
-                        Capsule().fill(.white.opacity(0.14))
+                        Capsule().fill(palette.ink.opacity(palette.isLight ? 0.1 : 0.14))
                             .shimmer(music.isLoading)
                         Capsule()
-                            .fill(active ? accent : .white.opacity(0.92))
+                            .fill(active || palette.isLight ? accent : palette.ink.opacity(0.92))
                             .frame(width: max(0, w * fraction))
                     }
                     .frame(height: active ? 6 : 4)
@@ -383,7 +396,7 @@ struct ProgressBar: View {
                     .frame(width: 40, alignment: .leading)
             }
             .font(.system(size: 10.5, weight: .medium).monospacedDigit())
-            .foregroundStyle(.white.opacity(0.5))
+            .foregroundStyle(palette.inkTertiary)
         }
     }
 
@@ -399,6 +412,7 @@ struct ProgressBar: View {
 /// Placeholder row shaped like a search result, shown while results load.
 struct SkeletonRow: View {
     let widths: (CGFloat, CGFloat)
+    @Environment(\.palette) private var palette
     var body: some View {
         HStack(spacing: 10) {
             RoundedRectangle(cornerRadius: 6, style: .continuous).frame(width: 30, height: 30)
@@ -408,9 +422,54 @@ struct SkeletonRow: View {
             }
             Spacer()
         }
-        .foregroundStyle(.white.opacity(0.08))
+        .foregroundStyle(palette.ink.opacity(0.07))
         .shimmer(true)
         .padding(.horizontal, 10)
         .padding(.vertical, 5)
+    }
+}
+
+// MARK: - Glow
+
+/// Light around the notch in the cover's colors. A slowly turning angular
+/// gradient, drawn twice: a wide blurred halo and a thin crisp rim. It turns
+/// while playing (ambient life), holds dim when paused, and is absent when
+/// nothing is loaded.
+struct NotchGlow<S: Shape>: View {
+    let shape: S
+    let accent: NSColor
+    let isPlaying: Bool
+    let hasTrack: Bool
+    var intensity: Double = 1
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    var body: some View {
+        let colors = Self.spectrum(from: accent)
+        TimelineView(.animation(minimumInterval: 1.0 / 30, paused: !isPlaying || reduceMotion)) { ctx in
+            let angle = Angle.degrees(ctx.date.timeIntervalSinceReferenceDate * 40)
+            let gradient = AngularGradient(colors: colors, center: .center, angle: angle)
+            ZStack {
+                shape.stroke(gradient, lineWidth: 10).blur(radius: 14).opacity(0.9)
+                shape.stroke(gradient, lineWidth: 3).blur(radius: 3)
+            }
+        }
+        .opacity(hasTrack ? (isPlaying ? intensity : intensity * 0.35) : 0)
+        .animation(.easeInOut(duration: 0.6), value: isPlaying)
+        .animation(.easeInOut(duration: 0.6), value: hasTrack)
+        .allowsHitTesting(false)
+    }
+
+    /// Accent plus two neighbouring hues, so the glow shimmers rather than
+    /// being a flat single-color outline.
+    static func spectrum(from accent: NSColor) -> [Color] {
+        guard let c = accent.usingColorSpace(.deviceRGB) else { return [.white, .white] }
+        var h: CGFloat = 0, s: CGFloat = 0, b: CGFloat = 0
+        c.getHue(&h, saturation: &s, brightness: &b, alpha: nil)
+        let sat = max(s, 0.55), bri = max(b, 0.85)
+        func hue(_ d: CGFloat) -> Color {
+            Color(nsColor: NSColor(hue: (h + d + 1).truncatingRemainder(dividingBy: 1), saturation: sat, brightness: bri, alpha: 1))
+        }
+        let base = Color(nsColor: NSColor(hue: h, saturation: sat, brightness: bri, alpha: 1))
+        return [base, hue(0.09), .white.opacity(0.9), hue(-0.09), base]
     }
 }

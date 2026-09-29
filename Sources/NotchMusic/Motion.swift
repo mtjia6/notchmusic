@@ -74,6 +74,7 @@ extension AnyTransition {
 struct Shimmer: ViewModifier {
     let active: Bool
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.palette) private var palette
 
     func body(content: Content) -> some View {
         content.overlay {
@@ -83,7 +84,8 @@ struct Shimmer: ViewModifier {
                         let period = 1.3
                         let t = ctx.date.timeIntervalSinceReferenceDate.truncatingRemainder(dividingBy: period) / period
                         let band = geo.size.width * 0.45
-                        LinearGradient(colors: [.clear, .white.opacity(reduceMotion ? 0.12 : 0.55), .clear],
+                        LinearGradient(colors: [.clear, palette.isLight ? palette.accent.opacity(0.5)
+                                                                        : .white.opacity(reduceMotion ? 0.12 : 0.55), .clear],
                                        startPoint: .leading, endPoint: .trailing)
                             .frame(width: band)
                             .offset(x: reduceMotion ? geo.size.width / 2 - band / 2
