@@ -184,7 +184,7 @@ private struct SearchContent: View {
     var body: some View {
         VStack(spacing: 0) {
             HStack {
-                Text("Library")
+                Text("Search")
                     .font(.system(size: 12, weight: .semibold))
                     .foregroundStyle(.white.opacity(0.5))
                 Spacer()
@@ -201,7 +201,10 @@ private struct SearchContent: View {
                     .font(.system(size: 14))
                     .foregroundStyle(.white)
                     .focused($focused)
-                    .onSubmit { if let first = music.searchResults.first { play(first) } }
+                    .onSubmit {
+                        if let first = music.searchResults.first { play(first) }
+                        else if let first = music.catalogResults.first { open(first) }
+                    }
                 if music.isSearching {
                     ProgressView().controlSize(.small)
                 }
@@ -213,18 +216,29 @@ private struct SearchContent: View {
             .padding(.top, 6)
 
             ScrollView {
-                LazyVStack(spacing: 2) {
-                    ForEach(music.searchResults) { r in
-                        ResultRow(result: r) { play(r) }
+                LazyVStack(alignment: .leading, spacing: 2) {
+                    if !music.searchResults.isEmpty {
+                        SectionHeader(title: "In your library")
+                        ForEach(music.searchResults) { r in
+                            ResultRow(title: r.title, artist: r.artist, art: nil, trailing: "play.fill") { play(r) }
+                        }
+                    }
+                    if !music.catalogResults.isEmpty {
+                        SectionHeader(title: "Apple Music")
+                        ForEach(music.catalogResults) { song in
+                            ResultRow(title: song.title, artist: song.artist, art: song.artworkURL,
+                                      trailing: "arrow.up.forward") { open(song) }
+                        }
                     }
                 }
                 .padding(.horizontal, 14)
-                .padding(.vertical, 8)
+                .padding(.bottom, 8)
             }
             .scrollIndicators(.never)
             .overlay {
-                if music.searchResults.isEmpty && !music.isSearching && !query.isEmpty {
-                    Text("No matches in your library")
+                if music.searchResults.isEmpty && music.catalogResults.isEmpty
+                    && !music.isSearching && !query.isEmpty {
+                    Text("No matches")
                         .font(.system(size: 13))
                         .foregroundStyle(.white.opacity(0.4))
                 }
@@ -243,41 +257,81 @@ private struct SearchContent: View {
         music.play(r)
         setMode(.expanded)
     }
+
+    /// Music takes the foreground to show the song page, so get out of the way.
+    private func open(_ song: CatalogSong) {
+        music.open(song)
+        setMode(.collapsed)
+    }
+}
+
+private struct SectionHeader: View {
+    let title: String
+    var body: some View {
+        Text(title.uppercased())
+            .font(.system(size: 10, weight: .semibold))
+            .tracking(0.6)
+            .foregroundStyle(.white.opacity(0.4))
+            .padding(.horizontal, 10)
+            .padding(.top, 10)
+            .padding(.bottom, 2)
+    }
 }
 
 private struct ResultRow: View {
-    let result: SearchResult
+    let title: String
+    let artist: String
+    let art: URL?
+    let trailing: String
     let action: () -> Void
     @State private var hovering = false
 
     var body: some View {
         Button(action: action) {
             HStack(spacing: 10) {
-                Image(systemName: "music.note")
-                    .font(.system(size: 12))
-                    .foregroundStyle(.white.opacity(0.4))
-                    .frame(width: 18)
+                thumbnail
                 VStack(alignment: .leading, spacing: 1) {
-                    Text(result.title)
+                    Text(title)
                         .font(.system(size: 13, weight: .medium))
                         .foregroundStyle(.white)
-                    Text(result.artist)
+                    Text(artist)
                         .font(.system(size: 11))
                         .foregroundStyle(.white.opacity(0.5))
                 }
                 .lineLimit(1)
                 Spacer()
-                Image(systemName: "play.fill")
-                    .font(.system(size: 10))
+                Image(systemName: trailing)
+                    .font(.system(size: 10, weight: .semibold))
                     .foregroundStyle(.white.opacity(hovering ? 0.8 : 0))
             }
             .padding(.horizontal, 10)
-            .padding(.vertical, 6)
+            .padding(.vertical, 5)
             .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(.white.opacity(hovering ? 0.09 : 0)))
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .onHover { hovering = $0 }
+    }
+
+    @ViewBuilder private var thumbnail: some View {
+        let shape = RoundedRectangle(cornerRadius: 5, style: .continuous)
+        if let art {
+            AsyncImage(url: art, transaction: Transaction(animation: .easeOut(duration: 0.2))) { phase in
+                if let image = phase.image {
+                    image.resizable().aspectRatio(contentMode: .fill)
+                } else {
+                    Color.white.opacity(0.08)
+                }
+            }
+            .frame(width: 30, height: 30)
+            .clipShape(shape)
+        } else {
+            Image(systemName: "music.note")
+                .font(.system(size: 12))
+                .foregroundStyle(.white.opacity(0.45))
+                .frame(width: 30, height: 30)
+                .background(shape.fill(.white.opacity(0.08)))
+        }
     }
 }
 

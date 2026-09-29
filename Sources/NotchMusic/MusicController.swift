@@ -13,6 +13,8 @@ struct SearchResult: Identifiable, Equatable {
     var id: String
     var title: String
     var artist: String
+
+    var matchKey: String { SearchKey.make(title, artist) }
 }
 
 /// Owns everything we know about Music.app. All reads/writes go through
@@ -24,6 +26,7 @@ final class MusicController: ObservableObject {
     @Published private(set) var artwork: NSImage?
     @Published private(set) var accent: NSColor = .white
     @Published private(set) var searchResults: [SearchResult] = []
+    @Published private(set) var catalogResults: [CatalogSong] = []
     @Published private(set) var isSearching = false
 
     // Playback position is stored as an anchor plus the time it was sampled.
@@ -210,14 +213,16 @@ final class MusicController: ObservableObject {
         }
     }
 
-    // MARK: - Search (library only)
+    // MARK: - Search
 
+    /// Searches the library (Apple Events) and the Apple Music catalog (the public
+    /// iTunes Search API) in parallel. Library results publish as soon as they
+    /// arrive, so a slow network never delays them.
     func search(_ query: String) {
         searchTask?.cancel()
         let q = query.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !q.isEmpty else {
-            searchResults = []
-            isSearching = false
+            clearSearch()
             return
         }
         isSearching = true
@@ -225,40 +230,58 @@ final class MusicController: ObservableObject {
             // Debounce keystrokes.
             try? await Task.sleep(for: .milliseconds(220))
             if Task.isCancelled { return }
-            let source = """
-            tell application "Music"
-                set res to search library playlist 1 for "\(AppleScriptRunner.escape(q))"
-                set out to {}
-                set n to count of res
-                if n > 30 then set n to 30
-                repeat with i from 1 to n
-                    set t to item i of res
-                    set end of out to {persistent ID of t, name of t, artist of t}
-                end repeat
-                return out
-            end tell
-            """
-            let d = await runner.run(source, cache: false)
+
+            async let catalog = CatalogSearch.songs(matching: q)
+            let library = await searchLibrary(q)
             if Task.isCancelled { return }
-            var results: [SearchResult] = []
-            if let d, d.numberOfItems > 0 {
-                for i in 1...d.numberOfItems {
-                    guard let row = d.atIndex(i), row.numberOfItems >= 3 else { continue }
-                    results.append(SearchResult(
-                        id: row.atIndex(1)?.stringValue ?? "",
-                        title: row.atIndex(2)?.stringValue ?? "",
-                        artist: row.atIndex(3)?.stringValue ?? ""
-                    ))
-                }
-            }
-            self.searchResults = results
+            self.searchResults = library
+
+            let songs = (try? await catalog) ?? []
+            if Task.isCancelled { return }
+            // Songs already in the library are shown (and played) from there.
+            let owned = Set(library.map(\.matchKey))
+            self.catalogResults = songs.filter { !owned.contains($0.matchKey) }
             self.isSearching = false
         }
+    }
+
+    private func searchLibrary(_ q: String) async -> [SearchResult] {
+        let source = """
+        tell application "Music"
+            set res to search library playlist 1 for "\(AppleScriptRunner.escape(q))"
+            set out to {}
+            set n to count of res
+            if n > 30 then set n to 30
+            repeat with i from 1 to n
+                set t to item i of res
+                set end of out to {persistent ID of t, name of t, artist of t}
+            end repeat
+            return out
+        end tell
+        """
+        guard let d = await runner.run(source, cache: false), d.numberOfItems > 0 else { return [] }
+        var results: [SearchResult] = []
+        for i in 1...d.numberOfItems {
+            guard let row = d.atIndex(i), row.numberOfItems >= 3 else { continue }
+            results.append(SearchResult(
+                id: row.atIndex(1)?.stringValue ?? "",
+                title: row.atIndex(2)?.stringValue ?? "",
+                artist: row.atIndex(3)?.stringValue ?? ""
+            ))
+        }
+        return results
+    }
+
+    /// Music's scripting dictionary can only play tracks that are in the library,
+    /// so a catalog song is opened on its page in Music instead.
+    func open(_ song: CatalogSong) {
+        NSWorkspace.shared.open(song.musicAppURL)
     }
 
     func clearSearch() {
         searchTask?.cancel()
         searchResults = []
+        catalogResults = []
         isSearching = false
     }
 }
