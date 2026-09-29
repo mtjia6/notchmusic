@@ -600,7 +600,7 @@ struct SkeletonRow: View {
 
 // MARK: - Glow
 
-/// Siri-style light around the notch: the Apple Intelligence palette in two
+/// Light around the notch: a blue-to-green gradient in two
 /// angular gradients turning in opposite directions, so the colors flow into
 /// each other instead of spinning as one rigid ring. Wide blurred halo plus a
 /// thin rim. Flows while playing, holds dim when paused, absent with nothing
@@ -615,13 +615,13 @@ struct NotchGlow<S: Shape>: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     static var rainbow: [Color] { [
-        Color(red: 0.74, green: 0.51, blue: 0.95),   // lavender
-        Color(red: 0.96, green: 0.73, blue: 0.92),   // pink
-        Color(red: 0.55, green: 0.62, blue: 1.0),    // periwinkle
-        Color(red: 1.0, green: 0.40, blue: 0.47),    // coral
-        Color(red: 1.0, green: 0.73, blue: 0.44),    // peach
-        Color(red: 0.78, green: 0.53, blue: 1.0),    // violet
-        Color(red: 0.74, green: 0.51, blue: 0.95),   // back to lavender, seamless
+        Color(red: 0.16, green: 0.42, blue: 1.0),    // blue
+        Color(red: 0.22, green: 0.66, blue: 1.0),    // sky
+        Color(red: 0.13, green: 0.86, blue: 0.93),   // cyan
+        Color(red: 0.2, green: 0.9, blue: 0.62),     // aqua green
+        Color(red: 0.36, green: 0.86, blue: 0.36),   // green
+        Color(red: 0.13, green: 0.78, blue: 0.8),    // teal
+        Color(red: 0.16, green: 0.42, blue: 1.0),    // back to blue, seamless
     ] }
 
     var body: some View {
