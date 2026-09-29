@@ -10,6 +10,7 @@ struct NotchRootView: View {
     /// in the panel are the same element, so it travels between the two.
     @Namespace private var ns
     @AppStorage("darkPanel") private var darkPanel = false
+    @AppStorage("albumGlow") private var albumGlow = false
 
     var body: some View {
         let hasTrack = music.track != nil
@@ -22,7 +23,7 @@ struct NotchRootView: View {
 
         ZStack(alignment: .top) {
             // Glow first, so it sits behind the body and only spills outside it.
-            NotchGlow(shape: shape, accent: music.accent, isPlaying: music.isPlaying,
+            NotchGlow(shape: shape, accent: albumGlow ? music.accent : nil, isPlaying: music.isPlaying,
                       hasTrack: hasTrack, intensity: 1)
 
             // Body: black always underneath; the light surface fades in over it
@@ -82,7 +83,7 @@ struct NotchRootView: View {
                 .allowsHitTesting(false)
         }
         .frame(width: size.width + 2 * flare, height: size.height)
-        .contextMenu { AppMenu(darkPanel: $darkPanel) }
+        .contextMenu { AppMenu(darkPanel: $darkPanel, albumGlow: $albumGlow) }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .animation(Motion.morph, value: hasTrack)
         .animation(Motion.morph, value: vm.mode)
@@ -477,9 +478,11 @@ private struct ResultRow: View {
 
 private struct AppMenu: View {
     @Binding var darkPanel: Bool
+    @Binding var albumGlow: Bool
 
     var body: some View {
         Toggle("Dark Panel", isOn: $darkPanel)
+        Toggle("Glow in Album Color", isOn: $albumGlow)
         Button(SMAppService.mainApp.status == .enabled ? "✓ Launch at Login" : "Launch at Login") {
             let service = SMAppService.mainApp
             do {

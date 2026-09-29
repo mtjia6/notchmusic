@@ -437,14 +437,17 @@ struct SkeletonRow: View {
 /// nothing is loaded.
 struct NotchGlow<S: Shape>: View {
     let shape: S
-    let accent: NSColor
+    /// nil = white light; otherwise tinted by the cover color.
+    let accent: NSColor?
     let isPlaying: Bool
     let hasTrack: Bool
     var intensity: Double = 1
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
-        let colors = Self.spectrum(from: accent)
+        // White: bright and dimmer bands, so the rotation reads as moving light.
+        let colors = accent.map(Self.spectrum(from:))
+            ?? [.white, .white.opacity(0.45), .white, .white.opacity(0.3), .white]
         TimelineView(.animation(minimumInterval: 1.0 / 30, paused: !isPlaying || reduceMotion)) { ctx in
             let angle = Angle.degrees(ctx.date.timeIntervalSinceReferenceDate * 40)
             let gradient = AngularGradient(colors: colors, center: .center, angle: angle)
