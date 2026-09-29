@@ -52,6 +52,7 @@ final class MusicController: ObservableObject {
     private var pending: (key: String, deadline: Date)?
     /// When Music can't hand us artwork for a catalog track, keep the store's.
     private var optimisticArtKey: String?
+    private var artworkCache: [String: NSImage] = [:]
 
     private nonisolated static let musicBundleID = "com.apple.Music"
 
@@ -203,19 +204,35 @@ final class MusicController: ObservableObject {
                 end try
             end tell
             """)
-            guard id == self.artworkTrackID else { return }
-            let image = d.flatMap { NSImage(data: $0.data) }
+            guard id == self.artworkTrackID, let track = self.track else { return }
+            var image = d.flatMap { NSImage(data: $0.data) }
+
+            if image == nil {
+                let key = SearchKey.make(track.title, track.artist)
+                if key == self.optimisticArtKey { return }  // already showing the store cover
+                image = await self.storeArtwork(for: track)
+                guard id == self.artworkTrackID else { return }
+            }
             let color = await Task.detached(priority: .userInitiated) {
                 image.map(ArtworkColor.accent(for:)) ?? .white
             }.value
             guard id == self.artworkTrackID else { return }
-            if image == nil, let track = self.track,
-               SearchKey.make(track.title, track.artist) == self.optimisticArtKey {
-                return
-            }
             self.artwork = image
             self.accent = color
         }
+    }
+
+    /// Streamed tracks have no artwork over AppleScript, so fetch the cover
+    /// from the catalog. Cached per song so replays and skips back are instant.
+    private func storeArtwork(for track: Track) async -> NSImage? {
+        let key = SearchKey.make(track.title, track.artist)
+        if let cached = artworkCache[key] { return cached }
+        guard let url = await CatalogSearch.artworkURL(title: track.title, artist: track.artist, album: track.album),
+              let (data, _) = try? await URLSession.shared.data(from: url),
+              let image = NSImage(data: data) else { return nil }
+        if artworkCache.count > 50 { artworkCache.removeAll() }
+        artworkCache[key] = image
+        return image
     }
 
     // MARK: - Controls
@@ -414,6 +431,7 @@ final class MusicController: ObservableObject {
         Task {
             guard let (data, _) = try? await URLSession.shared.data(from: url),
                   let image = NSImage(data: data) else { return }
+            self.artworkCache[key] = image
             let color = await Task.detached(priority: .userInitiated) { ArtworkColor.accent(for: image) }.value
             // Still showing this song (optimistically or for real)?
             guard let track = self.track, SearchKey.make(track.title, track.artist) == key

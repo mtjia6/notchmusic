@@ -37,6 +37,7 @@ enum CatalogSearch {
             var artworkUrl100: String?
             var trackViewUrl: String
             var trackTimeMillis: Double?
+            var collectionName: String?
         }
         var results: [Item]
     }
@@ -47,17 +48,35 @@ enum CatalogSearch {
         return URLSession(configuration: config)
     }()
 
-    static func songs(matching query: String) async throws -> [CatalogSong] {
+    private static func search(_ query: String, limit: Int) async throws -> [Response.Item] {
         var c = URLComponents(string: "https://itunes.apple.com/search")!
         c.queryItems = [
             .init(name: "term", value: query),
             .init(name: "media", value: "music"),
             .init(name: "entity", value: "song"),
-            .init(name: "limit", value: "25"),
+            .init(name: "limit", value: String(limit)),
             .init(name: "country", value: Locale.current.region?.identifier ?? "US"),
         ]
         let (data, _) = try await session.data(from: c.url!)
-        let items = try JSONDecoder().decode(Response.self, from: data).results
+        return try JSONDecoder().decode(Response.self, from: data).results
+    }
+
+    /// Cover art for a track Music won't give us artwork for (streamed
+    /// "URL tracks" report zero artworks over AppleScript).
+    static func artworkURL(title: String, artist: String, album: String) async -> URL? {
+        guard let items = try? await search("\(title) \(artist)", limit: 10), !items.isEmpty else { return nil }
+        let fold = { (s: String) in s.folding(options: [.caseInsensitive, .diacriticInsensitive], locale: nil) }
+        let t = fold(title), a = fold(artist), al = fold(album)
+        // Best: same title, artist and album; then title+artist; then title; then the top hit.
+        let best = items.first { fold($0.trackName) == t && fold($0.artistName) == a && fold($0.collectionName ?? "") == al }
+            ?? items.first { fold($0.trackName) == t && fold($0.artistName) == a }
+            ?? items.first { fold($0.trackName) == t }
+            ?? items[0]
+        return best.artworkUrl100.flatMap { URL(string: $0.replacingOccurrences(of: "100x100bb", with: "600x600bb")) }
+    }
+
+    static func songs(matching query: String) async throws -> [CatalogSong] {
+        let items = try await search(query, limit: 25)
         return items.compactMap { item in
             guard let page = URL(string: item.trackViewUrl) else { return nil }
             // Artwork URLs encode their pixel size in the path.
