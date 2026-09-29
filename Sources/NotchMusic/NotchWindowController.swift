@@ -15,6 +15,7 @@ final class NotchWindowController {
     private let panel: NotchPanel
     private let vm: NotchViewModel
     private let music: MusicController
+    private let prompter: PrompterModel
     private var screen: NSScreen
     private var monitors: [Any] = []
     private var cancellables = Set<AnyCancellable>()
@@ -24,8 +25,9 @@ final class NotchWindowController {
     /// Extra room around the largest shape for its drop shadow.
     private let shadowPad: CGFloat = 40
 
-    init(music: MusicController) {
+    init(music: MusicController, prompter: PrompterModel) {
         self.music = music
+        self.prompter = prompter
         let screen = Self.pickScreen()
         self.screen = screen
         self.vm = NotchViewModel(notchSize: Self.notchSize(of: screen))
@@ -45,7 +47,7 @@ final class NotchWindowController {
         panel.isReleasedWhenClosed = false
         panel.ignoresMouseEvents = true
 
-        let root = NotchRootView(vm: vm, music: music) { [weak self] mode in
+        let root = NotchRootView(vm: vm, music: music, prompter: prompter) { [weak self] mode in
             self?.setMode(mode)
         }
         let host = NSHostingView(rootView: root)
@@ -157,8 +159,17 @@ final class NotchWindowController {
             return e
         }) { monitors.append(m) }
         if let m = NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown], handler: { [weak self] _ in
-            // A click anywhere outside our panel dismisses it.
-            Task { @MainActor in self?.setMode(.collapsed) }
+            // A click anywhere outside our panel dismisses it, except the
+            // prompter: you click into Zoom etc. while reading.
+            Task { @MainActor in
+                guard let self, self.vm.mode != .prompter else { return }
+                self.setMode(.collapsed)
+            }
+        }) { monitors.append(m) }
+        if let m = NSEvent.addLocalMonitorForEvents(matching: .scrollWheel, handler: { [weak self] e in
+            guard let self, self.vm.mode == .prompter else { return e }
+            self.prompter.nudge(-e.scrollingDeltaY * (e.hasPreciseScrollingDeltas ? 1 : 8))
+            return nil
         }) { monitors.append(m) }
     }
 
@@ -177,10 +188,10 @@ final class NotchWindowController {
             cancelPending()
         case (.expanded, false):
             schedule(.collapsed, after: 0.28)
-        case (.expanded, true), (.search, true):
+        case (.expanded, true), (.search, true), (.prompterEdit, true), (.prompter, true):
             cancelPending()
-        case (.search, false):
-            break // search stays open until Esc or an outside click
+        case (.search, false), (.prompterEdit, false), (.prompter, false):
+            break // these stay open until closed explicitly (or an outside click, except the prompter)
         }
     }
 
@@ -224,11 +235,17 @@ final class NotchWindowController {
         withAnimation(Motion.morph) {
             vm.mode = mode
         }
-        if mode == .search {
+        if mode == .search || mode == .prompterEdit || mode == .prompter {
             panel.makeKey()
-        } else {
+        }
+        if mode != .search {
             music.clearSearch()
         }
+        if mode != .prompter {
+            prompter.stop()
+        }
+        // Keep the script out of screen shares and recordings while prompting.
+        panel.sharingType = (mode == .prompter || mode == .prompterEdit) ? .none : .readOnly
         if mode == .collapsed || mode == .peek {
             panel.ignoresMouseEvents = !shapeRect(margin: 6).contains(NSEvent.mouseLocation)
         }

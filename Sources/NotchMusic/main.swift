@@ -4,10 +4,12 @@ import AppKit
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private var music: MusicController!
     private var controller: NotchWindowController!
+    private var prompter: PrompterModel!
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         music = MusicController()
-        controller = NotchWindowController(music: music)
+        prompter = PrompterModel()
+        controller = NotchWindowController(music: music, prompter: prompter)
     }
 }
 

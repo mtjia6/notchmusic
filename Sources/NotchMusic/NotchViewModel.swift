@@ -3,7 +3,8 @@ import SwiftUI
 
 enum NotchMode: Equatable {
     /// `peek`: a brief, non-interactive widening that announces a new song.
-    case collapsed, peek, expanded, search
+    /// `prompterEdit`: writing the script; `prompter`: reading strip under the camera.
+    case collapsed, peek, expanded, search, prompterEdit, prompter
 }
 
 /// UI state only. Knows the hardware notch size and derives the shape's
@@ -36,8 +37,10 @@ final class NotchViewModel: ObservableObject {
                           height: notchSize.height + 42)
         case .expanded:
             return CGSize(width: max(notchSize.width + 300, 500), height: notchSize.height + 160)
-        case .search:
+        case .search, .prompterEdit:
             return CGSize(width: max(notchSize.width + 300, 500), height: notchSize.height + 320)
+        case .prompter:
+            return CGSize(width: max(notchSize.width + 300, 480), height: notchSize.height + 150)
         }
     }
 
@@ -45,7 +48,8 @@ final class NotchViewModel: ObservableObject {
         switch mode {
         case .collapsed: 10
         case .peek: 18
-        case .expanded, .search: 26
+        case .expanded, .search, .prompterEdit: 26
+        case .prompter: 22
         }
     }
 

@@ -4,6 +4,7 @@ import SwiftUI
 struct NotchRootView: View {
     @ObservedObject var vm: NotchViewModel
     @ObservedObject var music: MusicController
+    @ObservedObject var prompter: PrompterModel
     let setMode: (NotchMode) -> Void
 
     /// Shared-element space: the small cover in the notch and the big cover
@@ -17,24 +18,26 @@ struct NotchRootView: View {
         let size = vm.bodySize(hasTrack: hasTrack)
         let flare = NotchViewModel.topFlare
         let shape = NotchShape(topRadius: flare, bottomRadius: vm.bottomRadius)
-        let open = vm.mode == .expanded || vm.mode == .search
+        let open = vm.mode == .expanded || vm.mode == .search || vm.mode == .prompterEdit
+        let prompting = vm.mode == .prompter
         let glass = open && !darkPanel
         let palette = glass ? Palette.glass : Palette.dark(accent: music.accent)
 
         ZStack(alignment: .top) {
             // Glow first, so it sits behind the body and only spills outside it.
+            // No glow while prompting: nothing should pull the eye from the text.
             NotchGlow(shape: shape, accent: albumGlow ? music.accent : nil, isPlaying: music.isPlaying,
-                      hasTrack: hasTrack, intensity: 1)
+                      hasTrack: hasTrack && !prompting, intensity: 1)
 
             // Body: black always underneath; the light surface fades in over it
             // as the notch opens, so the morph reads as "the notch blooms white".
             shape.fill(Color.black)
-                .shadow(color: .black.opacity(open ? 0.35 : vm.mode == .peek ? 0.3 : 0), radius: 22, y: 10)
+                .shadow(color: .black.opacity(open || prompting ? 0.35 : vm.mode == .peek ? 0.3 : 0), radius: 22, y: 10)
             GlassSurface(shape: shape, bottomRadius: vm.bottomRadius)
                 .opacity(glass ? 1 : 0)
 
             ZStack(alignment: .top) {
-                if open {
+                if open && vm.mode != .prompterEdit {
                     // Light pouring out of the camera notch.
                     LightSpeedField(origin: UnitPoint(x: 0.5, y: vm.notchSize.height / 2 / max(size.height, 1)),
                                     isPlaying: music.isPlaying, intensity: glass ? 0.85 : 1, additive: !glass)
@@ -67,6 +70,17 @@ struct NotchRootView: View {
                     SearchContent(music: music, notchHeight: vm.notchSize.height, setMode: setMode)
                         .frame(size: vm.bodySize(for: .search, hasTrack: hasTrack))
                         .transition(.opacity.animation(Motion.exit))
+                case .prompterEdit:
+                    PrompterEditView(model: prompter, notchHeight: vm.notchSize.height, setMode: setMode)
+                        .frame(size: vm.bodySize(for: .prompterEdit, hasTrack: hasTrack))
+                        .transition(.opacity.animation(Motion.exit))
+                case .prompter:
+                    PrompterView(model: prompter, notchHeight: vm.notchSize.height) {
+                        prompter.stop()
+                        setMode(.prompterEdit)
+                    }
+                    .frame(size: vm.bodySize(for: .prompter, hasTrack: hasTrack))
+                    .transition(.opacity.animation(Motion.exit))
                 }
 
                 // On the light card the camera housing sits in a black cutout,
@@ -88,7 +102,7 @@ struct NotchRootView: View {
                 .allowsHitTesting(false)
         }
         .frame(width: size.width + 2 * flare, height: size.height)
-        .contextMenu { AppMenu(darkPanel: $darkPanel, albumGlow: $albumGlow) }
+        .contextMenu { AppMenu(darkPanel: $darkPanel, albumGlow: $albumGlow) { setMode(.prompterEdit) } }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .animation(Motion.morph, value: hasTrack)
         .animation(Motion.morph, value: vm.mode)
@@ -184,6 +198,7 @@ private struct ExpandedContent: View {
                 EqualizerBars(isPlaying: music.isPlaying, color: palette.ink, barWidth: 2.5, maxHeight: 11)
                     .opacity(music.track == nil ? 0 : 0.9)
                 Spacer()
+                NotchButton(systemName: "text.alignleft", size: 12, hit: 26) { setMode(.prompterEdit) }
                 NotchButton(systemName: "magnifyingglass", size: 12, hit: 26) { setMode(.search) }
             }
             .frame(height: notchHeight)
@@ -519,8 +534,11 @@ private struct ResultRow: View {
 private struct AppMenu: View {
     @Binding var darkPanel: Bool
     @Binding var albumGlow: Bool
+    let openPrompter: () -> Void
 
     var body: some View {
+        Button("Teleprompter…", action: openPrompter)
+        Divider()
         Toggle("Dark Panel", isOn: $darkPanel)
         Toggle("Glow in Album Color", isOn: $albumGlow)
         Button(SMAppService.mainApp.status == .enabled ? "✓ Launch at Login" : "Launch at Login") {
