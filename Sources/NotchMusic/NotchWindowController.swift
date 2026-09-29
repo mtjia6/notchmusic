@@ -75,6 +75,10 @@ final class NotchWindowController {
             }
             .store(in: &cancellables)
 
+        if pinnedOpen {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { self.setMode(.expanded) }
+        }
+
         vm.$mode
             .removeDuplicates()
             .sink { [weak self] mode in self?.music.setLiveResync(mode != .collapsed) }
@@ -207,8 +211,12 @@ final class NotchWindowController {
         DispatchQueue.main.asyncAfter(deadline: .now() + 2.8, execute: work)
     }
 
+    /// Debug: `--pin-open` keeps the panel expanded, for profiling it.
+    private let pinnedOpen = CommandLine.arguments.contains("--pin-open")
+
     func setMode(_ mode: NotchMode) {
         cancelPending()
+        if pinnedOpen && mode != .expanded { return }
         guard vm.mode != mode else { return }
         if mode == .expanded && (vm.mode == .collapsed || vm.mode == .peek) {
             NSHapticFeedbackManager.defaultPerformer.perform(.alignment, performanceTime: .now)

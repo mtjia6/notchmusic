@@ -78,6 +78,10 @@ struct LightSpeedField: View {
                     }
                 }
             }
+            // Rasterize on the GPU (Metal) instead of CoreGraphics on the CPU,
+            // then add the result onto the panel as light.
+            .drawingGroup()
+            .blendMode(.plusLighter)
         }
         .allowsHitTesting(false)
     }

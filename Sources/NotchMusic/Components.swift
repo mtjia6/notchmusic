@@ -627,20 +627,50 @@ struct NotchGlow<S: Shape>: View {
 
     var body: some View {
         let colors = accent.map(Self.spectrum(from:)) ?? Self.rainbow
-        TimelineView(.animation(minimumInterval: 1.0 / 30, paused: reduceMotion)) { ctx in
-            let t = clock.advance(to: ctx.date, targetSpeed: isPlaying ? 1 : 0.3)
-            let a = AngularGradient(colors: colors, center: .center, angle: .degrees(t * 45))
-            let b = AngularGradient(colors: colors.reversed(), center: .center, angle: .degrees(-t * 28 + 90))
-            ZStack {
-                shape.stroke(a, lineWidth: 12).blur(radius: 16)
-                shape.stroke(b, lineWidth: 8).blur(radius: 10).opacity(0.6)
-                shape.stroke(a, lineWidth: 2.5).blur(radius: 2)
+        // Performance: the blurred ring is a *static* mask, blurred once. Each
+        // frame only rotates the gradient behind it, a pure transform, so the
+        // glow can animate continuously at near-zero CPU (re-blurring strokes
+        // every frame cost ~30% CPU).
+        GeometryReader { geo in
+            let pad: CGFloat = 44
+            let side = hypot(geo.size.width, geo.size.height) + 2 * pad
+            TimelineView(.animation(minimumInterval: 1.0 / 30, paused: reduceMotion)) { ctx in
+                let t = clock.advance(to: ctx.date, targetSpeed: isPlaying ? 1 : 0.3)
+                let box = CGSize(width: geo.size.width + 2 * pad, height: geo.size.height + 2 * pad)
+                ZStack {
+                    layer(colors, angle: t * 45, side: side, box: box, ring: ring(width: 12, blur: 16, pad: pad))
+                    layer(colors.reversed(), angle: -t * 28 + 90, side: side, box: box,
+                          ring: ring(width: 8, blur: 10, pad: pad))
+                        .opacity(0.6)
+                    layer(colors, angle: t * 45, side: side, box: box, ring: ring(width: 2.5, blur: 2, pad: pad))
+                }
+                .frame(width: geo.size.width, height: geo.size.height)
             }
         }
         .opacity(hasTrack ? (isPlaying ? intensity : intensity * 0.6) : 0)
         .animation(.easeInOut(duration: 0.6), value: isPlaying)
         .animation(.easeInOut(duration: 0.6), value: hasTrack)
         .allowsHitTesting(false)
+    }
+
+    /// A gradient turning inside a fixed box, cut to the ring. The mask sits
+    /// on the box (not the rotating square) so it keeps the notch's shape.
+    private func layer<M: View>(_ colors: [Color], angle: Double, side: CGFloat, box: CGSize, ring: M) -> some View {
+        ZStack {
+            AngularGradient(colors: colors, center: .center)
+                .frame(width: side, height: side)
+                .rotationEffect(.degrees(angle))
+        }
+        .frame(width: box.width, height: box.height)
+        .mask { ring }
+    }
+
+    /// The notch outline, stroked and blurred, inset by `pad` so the blur has
+    /// room to spread inside the mask's bounds.
+    private func ring(width: CGFloat, blur: CGFloat, pad: CGFloat) -> some View {
+        shape.stroke(Color.black, lineWidth: width)
+            .blur(radius: blur)
+            .padding(pad)
     }
 
     /// Accent plus two neighbouring hues, so the glow shimmers rather than
