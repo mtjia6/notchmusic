@@ -224,10 +224,21 @@ private struct SearchContent: View {
                         }
                     }
                     if !music.catalogResults.isEmpty {
-                        SectionHeader(title: "Apple Music")
+                        HStack {
+                            SectionHeader(title: "Apple Music")
+                            Spacer()
+                            if !music.canPlayCatalog {
+                                Button("Enable one-click play") { ShortcutRunner.install() }
+                                    .buttonStyle(.plain)
+                                    .font(.system(size: 10, weight: .semibold))
+                                    .foregroundStyle(Color(nsColor: music.accent))
+                                    .padding(.top, 10)
+                                    .padding(.horizontal, 10)
+                            }
+                        }
                         ForEach(music.catalogResults) { song in
                             ResultRow(title: song.title, artist: song.artist, art: song.artworkURL,
-                                      trailing: "arrow.up.forward") { open(song) }
+                                      trailing: music.canPlayCatalog ? "play.fill" : "arrow.up.forward") { open(song) }
                         }
                     }
                 }
@@ -258,10 +269,9 @@ private struct SearchContent: View {
         setMode(.expanded)
     }
 
-    /// Music takes the foreground to show the song page, so get out of the way.
     private func open(_ song: CatalogSong) {
-        music.open(song)
-        setMode(.collapsed)
+        // If it fell back to opening the page, Music comes forward; get out of the way.
+        setMode(music.play(song) ? .expanded : .collapsed)
     }
 }
 

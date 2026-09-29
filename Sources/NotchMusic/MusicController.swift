@@ -28,6 +28,8 @@ final class MusicController: ObservableObject {
     @Published private(set) var searchResults: [SearchResult] = []
     @Published private(set) var catalogResults: [CatalogSong] = []
     @Published private(set) var isSearching = false
+    /// Whether the "NotchPlay Link" shortcut is installed (enables one-click catalog play).
+    @Published private(set) var canPlayCatalog = false
 
     // Playback position is stored as an anchor plus the time it was sampled.
     // The UI extrapolates from it every frame instead of polling Music.
@@ -39,6 +41,13 @@ final class MusicController: ObservableObject {
     private var artworkTrackID: String?
     private var searchTask: Task<Void, Never>?
     private var resyncTimer: Timer?
+
+    /// Set while a catalog song is starting. Music takes about 1-3 s to switch,
+    /// and meanwhile we show the song optimistically and ignore state reports
+    /// about the *old* track so the UI doesn't flicker back to it.
+    private var pendingCatalog: (key: String, deadline: Date)?
+    /// When Music can't hand us artwork for a catalog track, keep the store's.
+    private var optimisticArtKey: String?
 
     private nonisolated static let musicBundleID = "com.apple.Music"
 
@@ -63,6 +72,14 @@ final class MusicController: ObservableObject {
         }
 
         refresh()
+        checkCatalogShortcut()
+    }
+
+    func checkCatalogShortcut() {
+        Task {
+            let installed = await ShortcutRunner.isInstalled()
+            if installed != self.canPlayCatalog { self.canPlayCatalog = installed }
+        }
     }
 
     var isMusicRunning: Bool {
@@ -121,8 +138,17 @@ final class MusicController: ObservableObject {
 
     private func apply(_ d: NSAppleEventDescriptor, sampledAt: Date) {
         let state = d.atIndex(1)?.stringValue ?? "stopped"
+        if let pending = pendingCatalog {
+            let key = d.numberOfItems >= 7
+                ? SearchKey.make(d.atIndex(2)?.stringValue ?? "", d.atIndex(3)?.stringValue ?? "")
+                : nil
+            if key != pending.key && Date() < pending.deadline { return }
+            pendingCatalog = nil
+        }
         guard d.numberOfItems >= 7 else {
-            clear()
+            // Mid-switch, Music briefly reports "playing" with no current track.
+            // Only a real stop should blank the notch.
+            if state == "stopped" || state == "notrunning" { clear() }
             return
         }
         let newTrack = Track(
@@ -169,6 +195,10 @@ final class MusicController: ObservableObject {
                 image.map(ArtworkColor.accent(for:)) ?? .white
             }.value
             guard id == self.artworkTrackID else { return }
+            if image == nil, let track = self.track,
+               SearchKey.make(track.title, track.artist) == self.optimisticArtKey {
+                return
+            }
             self.artwork = image
             self.accent = color
         }
@@ -272,10 +302,68 @@ final class MusicController: ObservableObject {
         return results
     }
 
-    /// Music's scripting dictionary can only play tracks that are in the library,
-    /// so a catalog song is opened on its page in Music instead.
-    func open(_ song: CatalogSong) {
-        NSWorkspace.shared.open(song.musicAppURL)
+    /// Plays a catalog song via the Shortcut if it's installed; otherwise opens
+    /// its page in Music (AppleScript alone can't play non-library tracks).
+    /// Returns false when it fell back to opening the page.
+    @discardableResult
+    func play(_ song: CatalogSong) -> Bool {
+        guard canPlayCatalog else {
+            NSWorkspace.shared.open(song.musicAppURL)
+            checkCatalogShortcut()
+            return false
+        }
+
+        // Show the song immediately; Music confirms it a second or two later.
+        let key = song.matchKey
+        let deadline = Date().addingTimeInterval(8)
+        pendingCatalog = (key, deadline)
+        refreshGeneration += 1  // drop any in-flight refresh about the old track
+        track = Track(id: "catalog-\(song.id)", title: song.title, artist: song.artist,
+                      album: "", duration: song.duration)
+        artworkTrackID = track?.id
+        artwork = nil  // never pair the new title with the old cover
+        isPlaying = true
+        positionAnchor = 0
+        anchorDate = Date()
+        loadStoreArtwork(song, key: key)
+
+        Task {
+            let ok = await ShortcutRunner.play(link: song.pageURL)
+            if !ok {
+                NSLog("NotchMusic: shortcut failed; opening the song page instead")
+                self.pendingCatalog = nil
+                NSWorkspace.shared.open(song.musicAppURL)
+                self.checkCatalogShortcut()
+            }
+            self.refresh()
+        }
+        // Safety net: if Music never reports the new song, resync after the deadline.
+        Task {
+            try? await Task.sleep(for: .seconds(8.2))
+            if let p = self.pendingCatalog, p.key == key, p.deadline == deadline {
+                self.pendingCatalog = nil
+            }
+            self.refresh()
+        }
+        return true
+    }
+
+    private func loadStoreArtwork(_ song: CatalogSong, key: String) {
+        guard let url = song.largeArtworkURL else { return }
+        let trackID = track?.id
+        Task {
+            guard let (data, _) = try? await URLSession.shared.data(from: url),
+                  let image = NSImage(data: data) else { return }
+            let color = await Task.detached(priority: .userInitiated) { ArtworkColor.accent(for: image) }.value
+            // Still showing this song (optimistically or for real)?
+            guard let track = self.track, SearchKey.make(track.title, track.artist) == key
+                    || track.id == trackID else { return }
+            if self.artwork == nil || track.id == trackID {
+                self.artwork = image
+                self.accent = color
+            }
+            self.optimisticArtKey = key
+        }
     }
 
     func clearSearch() {

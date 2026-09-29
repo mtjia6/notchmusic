@@ -5,7 +5,9 @@ struct CatalogSong: Identifiable, Equatable {
     var title: String
     var artist: String
     var artworkURL: URL?
+    var largeArtworkURL: URL?
     var pageURL: URL
+    var duration: Double   // seconds
 
     var matchKey: String { SearchKey.make(title, artist) }
 
@@ -34,6 +36,7 @@ enum CatalogSearch {
             var artistName: String
             var artworkUrl100: String?
             var trackViewUrl: String
+            var trackTimeMillis: Double?
         }
         var results: [Item]
     }
@@ -57,12 +60,13 @@ enum CatalogSearch {
         let items = try JSONDecoder().decode(Response.self, from: data).results
         return items.compactMap { item in
             guard let page = URL(string: item.trackViewUrl) else { return nil }
-            // Artwork URLs encode their size; ask for a sharper thumbnail.
-            let art = item.artworkUrl100.flatMap {
-                URL(string: $0.replacingOccurrences(of: "100x100bb", with: "120x120bb"))
+            // Artwork URLs encode their pixel size in the path.
+            func art(_ px: Int) -> URL? {
+                item.artworkUrl100.flatMap { URL(string: $0.replacingOccurrences(of: "100x100bb", with: "\(px)x\(px)bb")) }
             }
             return CatalogSong(id: item.trackId, title: item.trackName, artist: item.artistName,
-                               artworkURL: art, pageURL: page)
+                               artworkURL: art(120), largeArtworkURL: art(600), pageURL: page,
+                               duration: (item.trackTimeMillis ?? 0) / 1000)
         }
     }
 }

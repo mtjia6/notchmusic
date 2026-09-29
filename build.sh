@@ -10,6 +10,7 @@ rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp .build/release/NotchMusic "$APP/Contents/MacOS/NotchMusic"
 cp Info.plist "$APP/Contents/Info.plist"
+cp Resources/* "$APP/Contents/Resources/"
 
 # Sign with a stable identity so macOS keeps the Automation permission across
 # rebuilds (ad-hoc signatures change every build, which resets the grant).
