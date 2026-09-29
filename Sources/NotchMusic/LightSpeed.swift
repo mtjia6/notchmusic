@@ -56,7 +56,7 @@ struct LightSpeedField: View {
     var body: some View {
         TimelineView(.animation(minimumInterval: 1.0 / 30, paused: reduceMotion)) { ctx in
             Canvas { gc, size in
-                let t = clock.advance(to: ctx.date, targetSpeed: isPlaying ? 1 : 0.3)
+                let t = clock.advance(to: ctx.date, targetSpeed: isPlaying ? 2 : 0.6)
                 let now = ctx.date.timeIntervalSinceReferenceDate
                 let o = CGPoint(x: size.width * origin.x, y: size.height * origin.y)
                 // Far enough to reach the farthest corner.
