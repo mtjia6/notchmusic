@@ -11,6 +11,9 @@ struct LightSpeedField: View {
     let origin: UnitPoint
     let isPlaying: Bool
     var intensity: Double = 1
+    /// On a light surface, adding light washes colors to white; paint them
+    /// normally instead so the spectrum stays saturated.
+    var additive = true
     @State private var clock = RayClock()
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
@@ -38,11 +41,16 @@ struct LightSpeedField: View {
         }
     }()
 
-    private static let fringes: [(dAngle: Double, color: Color, width: CGFloat, alpha: Double)] = [
-        (0, Color(red: 0.55, green: 0.75, blue: 1), 5, 0.18),           // bloom
-        (-0.007, Color(red: 0.25, green: 0.55, blue: 1), 1.8, 0.95),    // blue fringe
-        (0.007, Color(red: 1, green: 0.58, blue: 0.2), 1.8, 0.9),       // warm fringe
-        (0, .white, 0.8, 1),                                            // hot core
+    /// Prism dispersion: each streak fans into a saturated spectrum, bands
+    /// offset by a hair of angle, like light through a prism (the reference).
+    private static let spectrum: [(dAngle: Double, color: Color)] = [
+        (-0.012, Color(red: 1.0, green: 0.12, blue: 0.2)),    // red
+        (-0.008, Color(red: 1.0, green: 0.48, blue: 0.0)),    // orange
+        (-0.004, Color(red: 1.0, green: 0.9, blue: 0.0)),     // yellow
+        (0.0, Color(red: 0.1, green: 1.0, blue: 0.3)),        // green
+        (0.004, Color(red: 0.0, green: 0.85, blue: 1.0)),     // cyan
+        (0.008, Color(red: 0.12, green: 0.32, blue: 1.0)),    // blue
+        (0.012, Color(red: 0.58, green: 0.18, blue: 1.0)),    // violet
     ]
 
     var body: some View {
@@ -53,7 +61,7 @@ struct LightSpeedField: View {
                 let o = CGPoint(x: size.width * origin.x, y: size.height * origin.y)
                 // Far enough to reach the farthest corner.
                 let reach = hypot(max(o.x, size.width - o.x), max(o.y, size.height - o.y))
-                gc.blendMode = .plusLighter
+                gc.blendMode = additive ? .plusLighter : .normal
                 for ray in Self.rays {
                     let d = (t * ray.speed + ray.offset).truncatingRemainder(dividingBy: 1)
                     let r0 = reach * (0.06 + d * d * 1.05)           // accelerates outward
@@ -61,30 +69,40 @@ struct LightSpeedField: View {
                     let flare = 0.75 + 0.25 * sin(now * 3.1 + ray.twinkle)
                     let alpha = sin(d * .pi) * ray.brightness * flare * intensity
                     guard alpha > 0.02 else { continue }
-                    for f in Self.fringes {
-                        let a = ray.angle + f.dAngle
-                        let start = CGPoint(x: o.x + cos(a) * r0, y: o.y + sin(a) * r0)
-                        let end = CGPoint(x: o.x + cos(a) * r1, y: o.y + sin(a) * r1)
-                        var p = Path()
-                        p.move(to: start)
-                        p.addLine(to: end)
-                        // Brightest just past the middle, soft at both ends.
-                        let peak = f.color.opacity(min(1, alpha * f.alpha))
-                        let grad = Gradient(stops: [.init(color: f.color.opacity(0), location: 0),
-                                                    .init(color: peak, location: 0.6),
-                                                    .init(color: f.color.opacity(0), location: 1)])
-                        gc.stroke(p, with: .linearGradient(grad, startPoint: start, endPoint: end),
-                                  style: StrokeStyle(lineWidth: ray.width * f.width, lineCap: .round))
+                    // Spectral bands. Each ray favors a different part of the
+                    // spectrum (by its twinkle seed), so some read blue, some
+                    // orange, some green, as in the reference.
+                    for (i, band) in Self.spectrum.enumerated() {
+                        let bias = 0.45 + 0.55 * max(0, cos(Double(i) * 0.9 - ray.twinkle))
+                        stroke(gc, o, ray.angle + band.dAngle, r0, r1, band.color, alpha * bias, ray.width * 1.3)
                     }
+                    // Hot white core down the middle.
+                    stroke(gc, o, ray.angle, r0, r1, .white, alpha * (additive ? 0.9 : 0.45), ray.width * 0.6)
                 }
             }
             // Rasterize on the GPU (Metal) instead of CoreGraphics on the CPU,
             // then add the result onto the panel as light.
             .drawingGroup()
-            .blendMode(.plusLighter)
+            .blendMode(additive ? .plusLighter : .normal)
         }
         .allowsHitTesting(false)
     }
+}
+
+/// One streak: a line from r0 to r1 along `angle`, fading in and out along
+/// its length, brightest just past the middle.
+private func stroke(_ gc: GraphicsContext, _ o: CGPoint, _ angle: Double, _ r0: Double, _ r1: Double,
+                    _ color: Color, _ alpha: Double, _ width: CGFloat) {
+    let start = CGPoint(x: o.x + cos(angle) * r0, y: o.y + sin(angle) * r0)
+    let end = CGPoint(x: o.x + cos(angle) * r1, y: o.y + sin(angle) * r1)
+    var p = Path()
+    p.move(to: start)
+    p.addLine(to: end)
+    let grad = Gradient(stops: [.init(color: color.opacity(0), location: 0),
+                                .init(color: color.opacity(min(1, alpha)), location: 0.6),
+                                .init(color: color.opacity(0), location: 1)])
+    gc.stroke(p, with: .linearGradient(grad, startPoint: start, endPoint: end),
+              style: StrokeStyle(lineWidth: width, lineCap: .round))
 }
 
 /// Integrates time at a variable speed, so slowing down on pause eases the

@@ -37,7 +37,7 @@ struct NotchRootView: View {
                 if open {
                     // Light pouring out of the camera notch.
                     LightSpeedField(origin: UnitPoint(x: 0.5, y: vm.notchSize.height / 2 / max(size.height, 1)),
-                                    isPlaying: music.isPlaying, intensity: glass ? 0.9 : 1)
+                                    isPlaying: music.isPlaying, intensity: glass ? 0.85 : 1, additive: !glass)
                         .transition(.opacity.animation(.easeOut(duration: 0.5)))
                 }
                 if open && !glass {
