@@ -122,13 +122,23 @@ private struct ExpandedContent: View {
                     Spacer(minLength: 8)
                     HStack(spacing: 4) {
                         NotchButton(systemName: "backward.fill", size: 15) { music.previous() }
-                        NotchButton(systemName: music.isPlaying ? "pause.fill" : "play.fill", size: 22, hit: 40) {
-                            music.playPause()
+                        if music.isLoading {
+                            ProgressView()
+                                .controlSize(.small)
+                                .tint(.white)
+                                .frame(width: 40, height: 40)
+                                .transition(.opacity)
+                        } else {
+                            NotchButton(systemName: music.isPlaying ? "pause.fill" : "play.fill", size: 22, hit: 40) {
+                                music.playPause()
+                            }
+                            .transition(.opacity)
                         }
                         NotchButton(systemName: "forward.fill", size: 15) { music.next() }
                     }
                 }
                 .animation(.easeOut(duration: 0.25), value: track.id)
+                .animation(.easeOut(duration: 0.2), value: music.isLoading)
                 .padding(.horizontal, 26)
                 .padding(.top, 6)
 

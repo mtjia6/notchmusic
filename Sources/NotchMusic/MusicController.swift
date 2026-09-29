@@ -28,6 +28,9 @@ final class MusicController: ObservableObject {
     @Published private(set) var searchResults: [SearchResult] = []
     @Published private(set) var catalogResults: [CatalogSong] = []
     @Published private(set) var isSearching = false
+    /// A song was requested and Music is fetching/buffering it. The clock is
+    /// held at 0:00 until Music's position actually starts moving.
+    @Published private(set) var isLoading = false
     /// Whether the "NotchPlay Link" shortcut is installed (enables one-click catalog play).
     @Published private(set) var canPlayCatalog = false
 
@@ -42,10 +45,11 @@ final class MusicController: ObservableObject {
     private var searchTask: Task<Void, Never>?
     private var resyncTimer: Timer?
 
-    /// Set while a catalog song is starting. Music takes about 1-3 s to switch,
-    /// and meanwhile we show the song optimistically and ignore state reports
-    /// about the *old* track so the UI doesn't flicker back to it.
-    private var pendingCatalog: (key: String, deadline: Date)?
+    /// Set while a requested song is starting. Catalog songs take ~1.2-1.7 s for
+    /// Music to switch and ~1 s more to buffer. Meanwhile we ignore reports about
+    /// the *old* track (so the UI doesn't flicker back) and hold the clock at 0
+    /// while the new one buffers (so it doesn't tick, then jump back).
+    private var pending: (key: String, deadline: Date)?
     /// When Music can't hand us artwork for a catalog track, keep the store's.
     private var optimisticArtKey: String?
 
@@ -124,26 +128,35 @@ final class MusicController: ObservableObject {
     """
 
     func refresh() {
+        Task { await refreshNow() }
+    }
+
+    /// Awaitable refresh, so pollers can wait for each answer instead of
+    /// issuing overlapping requests that would keep superseding each other.
+    func refreshNow() async {
         guard isMusicRunning else { clear(); return }
         refreshGeneration += 1
         let generation = refreshGeneration
         let requestedAt = Date()
-        Task {
-            guard let d = await runner.run(Self.stateScript) else { return }
-            // A newer refresh was issued while this one was in flight; drop it.
-            guard generation == self.refreshGeneration else { return }
-            self.apply(d, sampledAt: requestedAt)
-        }
+        guard let d = await runner.run(Self.stateScript) else { return }
+        // A newer refresh was issued while this one was in flight; drop it.
+        guard generation == refreshGeneration else { return }
+        apply(d, sampledAt: requestedAt)
     }
 
     private func apply(_ d: NSAppleEventDescriptor, sampledAt: Date) {
         let state = d.atIndex(1)?.stringValue ?? "stopped"
-        if let pending = pendingCatalog {
+        let reportedPosition = d.atIndex(6)?.doubleValue ?? 0
+        var buffering = false
+        if let pending {
             let key = d.numberOfItems >= 7
                 ? SearchKey.make(d.atIndex(2)?.stringValue ?? "", d.atIndex(3)?.stringValue ?? "")
                 : nil
-            if key != pending.key && Date() < pending.deadline { return }
-            pendingCatalog = nil
+            if Date() < pending.deadline {
+                if key != pending.key { return }  // still the old track, or mid-switch
+                buffering = !(state == "playing" && reportedPosition > 0.05)
+            }
+            if !buffering { finishLoading() }
         }
         guard d.numberOfItems >= 7 else {
             // Mid-switch, Music briefly reports "playing" with no current track.
@@ -159,9 +172,9 @@ final class MusicController: ObservableObject {
             duration: d.atIndex(5)?.doubleValue ?? 0
         )
         if newTrack != track { track = newTrack }
-        let playing = state == "playing"
+        let playing = state == "playing" && !buffering
         if playing != isPlaying { isPlaying = playing }
-        positionAnchor = d.atIndex(6)?.doubleValue ?? 0
+        positionAnchor = buffering ? 0 : reportedPosition
         anchorDate = sampledAt
 
         if newTrack.id != artworkTrackID {
@@ -172,6 +185,7 @@ final class MusicController: ObservableObject {
 
     private func clear() {
         refreshGeneration += 1
+        finishLoading()
         if track != nil { track = nil }
         if isPlaying { isPlaying = false }
         artwork = nil
@@ -227,6 +241,7 @@ final class MusicController: ObservableObject {
     }
 
     func play(_ result: SearchResult) {
+        beginLoading(key: result.matchKey)
         let id = AppleScriptRunner.escape(result.id)
         send("""
         tell application "Music"
@@ -313,16 +328,20 @@ final class MusicController: ObservableObject {
             return false
         }
 
+        // Stop the old song right away so the click feels answered.
+        if isPlaying, let old = track, !old.id.hasPrefix("catalog-") {
+            fadeOutAndPause(ifStillPlaying: old.id)
+        }
+
         // Show the song immediately; Music confirms it a second or two later.
         let key = song.matchKey
-        let deadline = Date().addingTimeInterval(8)
-        pendingCatalog = (key, deadline)
+        beginLoading(key: key)
         refreshGeneration += 1  // drop any in-flight refresh about the old track
         track = Track(id: "catalog-\(song.id)", title: song.title, artist: song.artist,
                       album: "", duration: song.duration)
         artworkTrackID = track?.id
         artwork = nil  // never pair the new title with the old cover
-        isPlaying = true
+        isPlaying = false
         positionAnchor = 0
         anchorDate = Date()
         loadStoreArtwork(song, key: key)
@@ -331,21 +350,62 @@ final class MusicController: ObservableObject {
             let ok = await ShortcutRunner.play(link: song.pageURL)
             if !ok {
                 NSLog("NotchMusic: shortcut failed; opening the song page instead")
-                self.pendingCatalog = nil
+                self.finishLoading()
                 NSWorkspace.shared.open(song.musicAppURL)
                 self.checkCatalogShortcut()
             }
             self.refresh()
         }
-        // Safety net: if Music never reports the new song, resync after the deadline.
-        Task {
-            try? await Task.sleep(for: .seconds(8.2))
-            if let p = self.pendingCatalog, p.key == key, p.deadline == deadline {
-                self.pendingCatalog = nil
-            }
-            self.refresh()
-        }
         return true
+    }
+
+    // MARK: - Loading
+
+    private func beginLoading(key: String) {
+        let deadline = Date().addingTimeInterval(10)
+        pending = (key, deadline)
+        isLoading = true
+        // Music posts no notification when buffered audio starts, so poll
+        // briefly (each probe is one cheap Apple Event) until it does.
+        Task {
+            while let p = self.pending, p.deadline == deadline, Date() < deadline {
+                try? await Task.sleep(for: .milliseconds(120))
+                await self.refreshNow()
+            }
+            if let p = self.pending, p.deadline == deadline {
+                self.finishLoading()  // gave up waiting; show whatever Music says
+                self.refresh()
+            }
+        }
+    }
+
+    private func finishLoading() {
+        pending = nil
+        if isLoading { isLoading = false }
+    }
+
+    /// Quick volume ramp then pause, only if the old track is still current
+    /// (so it can never pause the *new* song if Music was unusually fast).
+    /// Volume is restored after the pause, while silent.
+    private func fadeOutAndPause(ifStillPlaying oldID: String) {
+        let id = AppleScriptRunner.escape(oldID)
+        Task {
+            _ = await runner.run("""
+            tell application "Music"
+                if player state is not playing then return
+                set v to sound volume
+                try
+                    repeat with i from 1 to 4
+                        if persistent ID of current track is not "\(id)" then exit repeat
+                        set sound volume to (v * (4 - i) / 4) as integer
+                        delay 0.035
+                    end repeat
+                    if persistent ID of current track is "\(id)" then pause
+                end try
+                set sound volume to v
+            end tell
+            """, cache: false)
+        }
     }
 
     private func loadStoreArtwork(_ song: CatalogSong, key: String) {
