@@ -4,7 +4,7 @@ just a little thing i made for myself because i wanted it on my mac. not a produ
 
 music player that lives in the notch. hover it → cover, controls, progress bar.
 also has apple music search, and a script view for reading notes under the camera on calls.
-no dock icon. settings = right-click the notch.
+no dock icon. settings = right-click the notch. quit = ♪ in the menu bar. start it again = spotlight → NotchMusic.
 
 ## run it
 

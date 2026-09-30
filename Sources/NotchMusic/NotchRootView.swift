@@ -192,6 +192,7 @@ private struct ExpandedContent: View {
                 Spacer()
                 NotchButton(systemName: "text.alignleft", size: 12, hit: 26) { setMode(.prompterEdit) }
                 NotchButton(systemName: "magnifyingglass", size: 12, hit: 26) { setMode(.search) }
+                NotchButton(systemName: "power", size: 12, hit: 26) { NSApp.terminate(nil) }
             }
             .frame(height: notchHeight)
             .padding(.horizontal, 24)
